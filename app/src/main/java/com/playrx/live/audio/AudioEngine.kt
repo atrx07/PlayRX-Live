@@ -142,15 +142,15 @@ object SampleBank {
                 var phase = 0.0
                 for (i in out.indices) {
                     val t = i.toDouble() / SAMPLE_RATE
-                    val freq = 50 + (100 - row * 10) * exp(-t * (25 - row * 2))
+                    val freq = 50.0 + (100 - row * 10).toDouble() * exp(-t * (25 - row * 2).toDouble())
                     phase += 2 * PI * freq / SAMPLE_RATE
-                    out[i] = (sin(phase) * exp(-t * (9 - row))).toFloat()
+                    out[i] = (sin(phase) * exp(-t * (9 - row).toDouble())).toFloat()
                 }
                 out
             }
             1 -> { // Snare: noise + body
                 val noise = noiseBuffer(0.25, 11 + row)
-                val body = sineNote(190.0 - row * 10, 0.25, 18.0)
+                val body = sineNote(190.0 - row * 10.0, 0.25, 18.0)
                 val out = FloatArray(noise.size)
                 for (i in out.indices) {
                     val t = i.toDouble() / SAMPLE_RATE
@@ -206,7 +206,7 @@ object SampleBank {
                 out
             }
             6 -> { // Vox: sine + vibrato, row varies pitch
-                val freq = 300.0 + row * 50
+                val freq = 300.0 + row * 50.0
                 val n = (0.8 * SAMPLE_RATE).toInt()
                 val out = FloatArray(n)
                 for (i in out.indices) {
@@ -217,11 +217,11 @@ object SampleBank {
                 out
             }
             7 -> { // FX: noise sweep, row varies length
-                val noise = noiseBuffer(0.4 + row * 0.2, 55 + row)
+                val noise = noiseBuffer(0.4 + row.toDouble() * 0.2, 55 + row)
                 val out = FloatArray(noise.size)
                 for (i in out.indices) {
                     val t = i.toDouble() / SAMPLE_RATE
-                    out[i] = (noise[i] * exp(-t * (3 + row))).toFloat()
+                    out[i] = (noise[i] * exp(-t * (3 + row).toDouble())).toFloat()
                 }
                 out
             }
