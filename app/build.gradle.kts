@@ -26,7 +26,10 @@ android {
     // of silently signing with a new key. This is DEBUG-only; a release
     // keystore is a separate, private setup.
     signingConfigs {
-        create("debug") {
+        // AGP already creates a "debug" config — create() duplicates it
+        // and fails (run #17, build.gradle.kts:29). Configure the
+        // existing one instead.
+        getByName("debug") {
             storeFile = file("${System.getProperty("user.home")}/.android/debug.keystore")
             storePassword = "android"
             keyAlias = "androiddebugkey"
