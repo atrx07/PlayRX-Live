@@ -1,5 +1,7 @@
 # PlayRX Live
 
+[![Android Build](https://github.com/atrx07/PlayRX-Live/actions/workflows/android.yml/badge.svg)](https://github.com/atrx07/PlayRX-Live/actions/workflows/android.yml)
+
 An open-source, free Android beat-making and live-performance app — inspired by pad/loop apps like Remixlive, but with **no paywall, no locked packs, and no locked features**.
 
 PlayRX Live is built to work **in parallel with a Yamaha PSR-SX arranger keyboard** (SX600 / SX700 / SX900): the keyboard keeps doing its own backing/styles and lead playing, while the app adds synced loops, pads, and chord-aware accompaniment on the phone/tablet.
