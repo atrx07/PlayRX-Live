@@ -11,6 +11,11 @@ name: Android Build
 # If the secret is missing, the build still succeeds with the runner's
 # throwaway debug key — it just won't update in place.
 #
+# NOTE: GitHub Actions does not allow the `secrets` context in an `if:`
+# condition, so the "secret present?" check is done inside the shell
+# script below, not with `if:`. Using `if: ${{ secrets... }}` makes the
+# whole workflow fail immediately at parse time.
+#
 # NOTE: this repo deliberately has no Gradle wrapper (gradlew). The
 # wrapper JAR is a binary file that cannot go through the project's
 # GitHub push tooling, so the workflow installs Gradle directly
@@ -42,10 +47,11 @@ jobs:
           gradle-version: 8.7
 
       - name: Restore consistent debug keystore
-        if: ${{ secrets.DEBUG_KEYSTORE_B64 != '' }}
         run: |
-          mkdir -p ~/.android
-          echo "$DEBUG_KEYSTORE_B64" | base64 --decode > ~/.android/debug.keystore
+          if [ -n "$DEBUG_KEYSTORE_B64" ]; then
+            mkdir -p ~/.android
+            echo "$DEBUG_KEYSTORE_B64" | base64 --decode > ~/.android/debug.keystore
+          fi
         env:
           DEBUG_KEYSTORE_B64: ${{ secrets.DEBUG_KEYSTORE_B64 }}
 
