@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Match any USB MIDI device (class 1, audio). The keyboard appears via USB TO HOST. -->
+    <usb-device class="1" subclass="3" protocol="0" />
+    <usb-device class="1" subclass="1" protocol="0" />
+</resources>
