@@ -149,7 +149,7 @@ object SampleBank {
                 out
             }
             1 -> { // Snare: noise + body
-                val noise = noiseBuffer(0.25, 11 + row)
+                val noise = noiseBuffer(0.25, (11 + row).toLong())
                 val body = sineNote(190.0 - row * 10.0, 0.25, 18.0)
                 val out = FloatArray(noise.size)
                 for (i in out.indices) {
@@ -159,7 +159,7 @@ object SampleBank {
                 out
             }
             2 -> { // Tops: even rows closed hat, odd rows open hat
-                val noise = noiseBuffer(if (row % 2 == 0) 0.06 else 0.35, 22 + row)
+                val noise = noiseBuffer(if (row % 2 == 0) 0.06 else 0.35, (22 + row).toLong())
                 val out = FloatArray(noise.size)
                 for (i in out.indices) {
                     val t = i.toDouble() / SAMPLE_RATE
@@ -217,7 +217,7 @@ object SampleBank {
                 out
             }
             7 -> { // FX: noise sweep, row varies length
-                val noise = noiseBuffer(0.4 + row.toDouble() * 0.2, 55 + row)
+                val noise = noiseBuffer(0.4 + row.toDouble() * 0.2, (55 + row).toLong())
                 val out = FloatArray(noise.size)
                 for (i in out.indices) {
                     val t = i.toDouble() / SAMPLE_RATE
