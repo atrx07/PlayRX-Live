@@ -236,6 +236,36 @@ class PlaybackEngine {
     private val pattern = Array(8) { BooleanArray(16) }
     private val activeLoops = mutableSetOf<Int>()
 
+    // Full-pad mixer: per-pad volume, mute, solo (pads 0..23).
+    private val padVolumes = FloatArray(24) { 1f }
+    private val padMuted = BooleanArray(24)
+    private val padSolo = BooleanArray(24)
+
+    fun setPadVolume(pad: Int, volume: Float) {
+        if (pad in 0..23) padVolumes[pad] = volume.coerceIn(0f, 1f)
+    }
+
+    fun getPadVolume(pad: Int): Float = if (pad in 0..23) padVolumes[pad] else 1f
+    fun setPadMuted(pad: Int, muted: Boolean) {
+        if (pad in 0..23) padMuted[pad] = muted
+    }
+
+    fun isPadMuted(pad: Int): Boolean = pad in 0..23 && padMuted[pad]
+    fun setPadSolo(pad: Int, solo: Boolean) {
+        if (pad in 0..23) padSolo[pad] = solo
+    }
+
+    fun isPadSolo(pad: Int): Boolean = pad in 0..23 && padSolo[pad]
+
+    /** Effective volume for a pad, applying mute/solo rules. */
+    private fun effectiveVolume(pad: Int, base: Float): Float {
+        if (pad !in 0..23) return base
+        if (padMuted[pad]) return 0f
+        val anySolo = padSolo.any { it }
+        if (anySolo && !padSolo[pad]) return 0f
+        return base * padVolumes[pad]
+    }
+
     fun setStep(track: Int, step: Int, on: Boolean) {
         if (track in 0..7 && step in 0..15) pattern[track][step] = on
     }
@@ -327,12 +357,15 @@ class PlaybackEngine {
             }
             onLoopsChanged?.invoke(activeLoops.toSet())
         } else {
-            pending.add(Voice(sample(pad), 0, 1f))
+            val vol = effectiveVolume(pad, 1f)
+            if (vol > 0f) pending.add(Voice(sample(pad), 0, vol))
         }
     }
 
-    private fun triggerSample(index: Int, volume: Float = 0.9f) {
-        pending.add(Voice(sample(index), 0, volume))
+    private fun triggerSample(index: Int, volume: Float = 0.9f, sourcePad: Int = -1) {
+        val pad = if (sourcePad in 0..23) sourcePad else index
+        val vol = effectiveVolume(pad, volume)
+        if (vol > 0f) pending.add(Voice(sample(index), 0, vol))
     }
 
     private fun mixLoop(at: AudioTrack) {
@@ -358,11 +391,11 @@ class PlaybackEngine {
                     lastStep = step
                     onStepChanged?.invoke(step)
                     for (trk in 0..7) {
-                        if (pattern[trk][step]) triggerSample(trk, 0.9f)
+                        if (pattern[trk][step]) triggerSample(trk, 0.9f, trk)
                     }
                     for (loopPad in activeLoops.toList()) {
                         for ((s, sampleIdx) in SampleBank.loopPattern(loopPad)) {
-                            if (s == step) triggerSample(sampleIdx, 0.85f)
+                            if (s == step) triggerSample(sampleIdx, 0.85f, loopPad)
                         }
                     }
                     // Drain voices triggered by this step immediately.

@@ -46,6 +46,11 @@ import com.playrx.live.midi.MidiEngine
  * - Transport: play/pause, stop, BPM 60-180, master volume, delay FX.
  * - Step sequencer: pick a drum pad, toggle its 16 steps. Steps play on
  *   the transport clock alongside any active loop pads.
+ * - Full pad: per-pad volume, mute, and solo (applies to one-shots,
+ *   sequencer steps, and loops for that pad), pad colours by type
+ *   (drums teal, bass blue, loops purple, selected amber, active
+ *   loop bright teal), and a pad edit panel. Edit mode selects a pad
+ *   without playing it.
  * - MIDI (existing): Connect MIDI shows the keyboard, chord readout updates
  *   from held notes. Chord-following of loops is NOT wired yet — that is
  *   the MIDI hardware test phase, after this audio core is proven.
@@ -79,6 +84,7 @@ class MainActivity : ComponentActivity() {
     private var selectedPad by mutableStateOf(0)
     private var editPattern by mutableStateOf(false)
     private var patternVersion by mutableStateOf(0)
+    private var mixerVersion by mutableStateOf(0)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -142,7 +148,10 @@ class MainActivity : ComponentActivity() {
         val isSelected = selectedPad == pad
         Button(
             onClick = {
-                if (editPattern && SampleBank.isDrumPad(pad)) {
+                if (editPattern) {
+                    // Edit mode: select the pad without playing it, so its
+                    // volume/mute/solo (and, for drum pads, its steps)
+                    // can be edited.
                     selectedPad = pad
                 } else {
                     engine.triggerPad(pad)
@@ -155,8 +164,10 @@ class MainActivity : ComponentActivity() {
             },
             colors = ButtonDefaults.buttonColors(
                 containerColor = when {
+                    isSelected -> Color(0xFFFFC107)
                     isActiveLoop -> Color(0xFF00BFA5)
-                    isSelected -> Color(0xFF1565C0)
+                    SampleBank.isLoopPad(pad) -> Color(0xFF6A1B9A)
+                    pad in 8..15 -> Color(0xFF1565C0)
                     else -> Color(0xFF2E7D6F)
                 }
             ),
@@ -286,6 +297,50 @@ class MainActivity : ComponentActivity() {
     }
 
     @Composable
+    private fun PadEditPanel() {
+        // Read mixerVersion so volume/mute/solo changes recompose this panel.
+        @Suppress("UNUSED_VARIABLE")
+        val version = mixerVersion
+        val pad = selectedPad
+        val type = when {
+            SampleBank.isLoopPad(pad) -> "Loop"
+            SampleBank.isDrumPad(pad) -> "Drum"
+            else -> "Bass"
+        }
+        Column {
+            Text(
+                "Pad: ${SampleBank.PAD_NAMES[pad]} ($type) — tap Edit pattern, then a pad, to select without playing",
+                style = MaterialTheme.typography.bodySmall,
+            )
+            Text("Pad volume: ${(engine.getPadVolume(pad) * 100).toInt()}%")
+            Slider(
+                value = engine.getPadVolume(pad),
+                onValueChange = {
+                    engine.setPadVolume(pad, it)
+                    mixerVersion++
+                },
+                valueRange = 0f..1f,
+            )
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Button(onClick = {
+                    engine.setPadMuted(pad, !engine.isPadMuted(pad))
+                    mixerVersion++
+                }) {
+                    Text(if (engine.isPadMuted(pad)) "Muted" else "Mute")
+                }
+                Button(onClick = {
+                    engine.setPadSolo(pad, !engine.isPadSolo(pad))
+                    mixerVersion++
+                }) {
+                    Text(if (engine.isPadSolo(pad)) "Soloed" else "Solo")
+                }
+            }
+        }
+    }
+
+    @Composable
     private fun SequencerRow() {
         Text(
             "Sequencer — ${SampleBank.PAD_NAMES[selectedPad]} (tap Edit pattern, pick a drum pad, then toggle steps)",
@@ -345,6 +400,7 @@ class MainActivity : ComponentActivity() {
                     .fillMaxWidth()
                     .padding(vertical = 8.dp),
             )
+            PadEditPanel()
             SequencerRow()
             Text(
                 "All sounds are synthesized in the app — no sample packs needed. " +
@@ -400,6 +456,7 @@ class MainActivity : ComponentActivity() {
                         style = MaterialTheme.typography.bodySmall,
                         modifier = Modifier.padding(top = 8.dp),
                     )
+                    PadEditPanel()
                 }
             }
             // Bottom: sequencer across the full width.
