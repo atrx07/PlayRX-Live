@@ -42,15 +42,18 @@ import com.playrx.live.midi.MidiEngine
 /**
  * PlayRX Live v1 + landscape-first UI pass (from the Remixlive 8.6.2 study).
  *
- * - 24 pads: 0-15 one-shot drums/bass, 16-23 repeating loop patterns.
+ * - 48 pads, 8x6: columns Kick/Snare/Tops/Bass/Synth/Pad/Vox/FX, rows
+ *   are variations 1..6. Pad + FX columns are repeating loop pads;
+ *   the rest are one-shots. This grid shape is familiar to Remixlive
+ *   users; the sounds, names, branding, and code are PlayRX's own.
  * - Transport: play/pause, stop, BPM 60-180, master volume, delay FX.
  * - Step sequencer: pick a drum pad, toggle its 16 steps. Steps play on
  *   the transport clock alongside any active loop pads.
- * - Full pad: per-pad volume, mute, and solo (applies to one-shots,
- *   sequencer steps, and loops for that pad), pad colours by type
- *   (drums teal, bass blue, loops purple, selected amber, active
- *   loop bright teal), and a pad edit panel. Edit mode selects a pad
- *   without playing it.
+ * - Full pad: per-pad volume, mute, and solo, plus a per-column mixer
+ *   (one strip per instrument column), and a pad edit panel. Edit mode
+ *   selects a pad without playing it.
+ * - Tabs: LOOP (pad grid), DRUM (sequencer), SEQ/SONG (placeholder —
+ *   projects, recording, and arranger are the next phase).
  * - MIDI (existing): Connect MIDI shows the keyboard, chord readout updates
  *   from held notes. Chord-following of loops is NOT wired yet — that is
  *   the MIDI hardware test phase, after this audio core is proven.
@@ -85,6 +88,18 @@ class MainActivity : ComponentActivity() {
     private var editPattern by mutableStateOf(false)
     private var patternVersion by mutableStateOf(0)
     private var mixerVersion by mutableStateOf(0)
+    private var selectedTab by mutableStateOf("LOOP")
+
+    private fun columnColor(col: Int): Color = when (col) {
+        0 -> Color(0xFFD32F2F) // Kick red
+        1 -> Color(0xFFEF6C00) // Snare orange
+        2 -> Color(0xFFF9A825) // Tops yellow
+        3 -> Color(0xFF43A047) // Bass green
+        4 -> Color(0xFF00ACC1) // Synth cyan
+        5 -> Color(0xFFEC407A) // Pad pink
+        6 -> Color(0xFF7E57C2) // Vox purple
+        else -> Color(0xFF42A5F5) // FX blue
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -166,9 +181,7 @@ class MainActivity : ComponentActivity() {
                 containerColor = when {
                     isSelected -> Color(0xFFFFC107)
                     isActiveLoop -> Color(0xFF00BFA5)
-                    SampleBank.isLoopPad(pad) -> Color(0xFF6A1B9A)
-                    pad in 8..15 -> Color(0xFF1565C0)
-                    else -> Color(0xFF2E7D6F)
+                    else -> columnColor(SampleBank.columnOf(pad))
                 }
             ),
             modifier = modifier.aspectRatio(1f),
@@ -191,7 +204,9 @@ class MainActivity : ComponentActivity() {
      */
     @Composable
     private fun PadGridRows(columns: Int, modifier: Modifier = Modifier) {
-        val rows = (24 + columns - 1) / columns
+        // For portrait, columns is the display width, not the 8 instrument
+        // columns: pads are still row-major in instrument order, just wrapped.
+        val rows = (SampleBank.PAD_COUNT + columns - 1) / columns
         Column(
             verticalArrangement = Arrangement.spacedBy(6.dp),
             modifier = modifier,
@@ -203,7 +218,7 @@ class MainActivity : ComponentActivity() {
                 ) {
                     for (col in 0 until columns) {
                         val pad = row * columns + col
-                        if (pad < 24) {
+                        if (pad < SampleBank.PAD_COUNT) {
                             PadButton(pad, Modifier.weight(1f))
                         }
                     }
@@ -220,8 +235,52 @@ class MainActivity : ComponentActivity() {
             verticalArrangement = Arrangement.spacedBy(6.dp),
             modifier = modifier,
         ) {
-            items(24) { pad ->
+            items(SampleBank.PAD_COUNT) { pad ->
                 PadButton(pad)
+            }
+        }
+    }
+
+    @Composable
+    private fun TopTabs() {
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            for (tab in listOf("LOOP", "SEQ", "DRUM", "SONG")) {
+                Button(onClick = { selectedTab = tab }) {
+                    Text(tab)
+                }
+            }
+        }
+    }
+
+    @Composable
+    private fun ColumnMixer() {
+        @Suppress("UNUSED_VARIABLE")
+        val version = mixerVersion
+        Text("Mixer — one strip per instrument column", style = MaterialTheme.typography.bodySmall)
+        for (col in 0 until SampleBank.COLUMNS) {
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(SampleBank.COLUMN_NAMES[col], modifier = Modifier.width(52.dp))
+                Slider(
+                    value = engine.getColumnVolume(col),
+                    onValueChange = {
+                        engine.setColumnVolume(col, it)
+                        mixerVersion++
+                    },
+                    valueRange = 0f..1f,
+                    modifier = Modifier.weight(1f),
+                )
+                Button(onClick = {
+                    engine.setColumnMuted(col, !engine.isColumnMuted(col))
+                    mixerVersion++
+                }) {
+                    Text(if (engine.isColumnMuted(col)) "M" else "m")
+                }
+                Button(onClick = {
+                    engine.setColumnSolo(col, !engine.isColumnSolo(col))
+                    mixerVersion++
+                }) {
+                    Text(if (engine.isColumnSolo(col)) "S" else "s")
+                }
             }
         }
     }
@@ -302,11 +361,7 @@ class MainActivity : ComponentActivity() {
         @Suppress("UNUSED_VARIABLE")
         val version = mixerVersion
         val pad = selectedPad
-        val type = when {
-            SampleBank.isLoopPad(pad) -> "Loop"
-            SampleBank.isDrumPad(pad) -> "Drum"
-            else -> "Bass"
-        }
+        val type = if (SampleBank.isLoopPad(pad)) "Loop" else "One-shot"
         Column {
             Text(
                 "Pad: ${SampleBank.PAD_NAMES[pad]} ($type) — tap Edit pattern, then a pad, to select without playing",
@@ -393,18 +448,33 @@ class MainActivity : ComponentActivity() {
             Row(modifier = Modifier.padding(vertical = 8.dp)) {
                 TransportButtons()
             }
+            TopTabs()
             MixControls()
-            PadGridRows(
-                columns = 6,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 8.dp),
-            )
-            PadEditPanel()
-            SequencerRow()
+            if (selectedTab == "LOOP") {
+                PadGridRows(
+                    columns = 4,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 8.dp),
+                )
+                PadEditPanel()
+                ColumnMixer()
+            } else if (selectedTab == "DRUM") {
+                SequencerRow()
+            } else {
+                Text(
+                    "$selectedTab view is next: projects, recording, and the song arranger " +
+                        "come after the pad and mixer are proven. PlayRX's edge over a " +
+                        "closed pad app is USB MIDI chord-following with a Yamaha keyboard, " +
+                        "open source, and no paywall.",
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.padding(vertical = 12.dp),
+                )
+            }
             Text(
-                "All sounds are synthesized in the app — no sample packs needed. " +
-                    "Loop pads repeat every bar. MIDI chord readout works when a keyboard " +
+                "48 pads, 8 instrument columns x 6 variations. All sounds are synthesized " +
+                    "in the app — no sample packs needed. Pad and FX columns are loop pads " +
+                    "that repeat every bar. MIDI chord readout works when a keyboard " +
                     "is connected; chord-following of loops comes with MIDI testing later.",
                 style = MaterialTheme.typography.bodySmall,
                 modifier = Modifier.padding(top = 12.dp),
@@ -431,36 +501,52 @@ class MainActivity : ComponentActivity() {
                 }
                 TransportButtons()
             }
-            // Middle: pad grid dominant, side panel for mix controls.
-            Row(
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxWidth()
-                    .padding(vertical = 8.dp),
-            ) {
-                PadGrid(
-                    columns = 8,
+            TopTabs()
+            if (selectedTab == "LOOP") {
+                // Middle: pad grid dominant, side panel for mix controls.
+                Row(
                     modifier = Modifier
                         .weight(1f)
-                        .fillMaxHeight()
-                        .padding(end = 12.dp),
-                )
-                Column(
-                    modifier = Modifier
-                        .width(240.dp)
-                        .fillMaxHeight(),
+                        .fillMaxWidth()
+                        .padding(vertical = 8.dp),
                 ) {
-                    MixControls()
-                    Text(
-                        "Pads 0–15: one-shots. Pads 16–23: loops.",
-                        style = MaterialTheme.typography.bodySmall,
-                        modifier = Modifier.padding(top = 8.dp),
+                    PadGrid(
+                        columns = 8,
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxHeight()
+                            .padding(end = 12.dp),
                     )
-                    PadEditPanel()
+                    Column(
+                        modifier = Modifier
+                            .width(240.dp)
+                            .fillMaxHeight()
+                            .verticalScroll(rememberScrollState()),
+                    ) {
+                        MixControls()
+                        Text(
+                            "8 columns x 6 variations = 48 pads. Pad + FX columns loop.",
+                            style = MaterialTheme.typography.bodySmall,
+                            modifier = Modifier.padding(top = 8.dp),
+                        )
+                        PadEditPanel()
+                        ColumnMixer()
+                    }
                 }
+                // Bottom: sequencer across the full width.
+                SequencerRow()
+            } else if (selectedTab == "DRUM") {
+                SequencerRow()
+            } else {
+                Text(
+                    "$selectedTab view is next: projects, recording, and the song arranger " +
+                        "come after the pad and mixer are proven. PlayRX's edge over a " +
+                        "closed pad app is USB MIDI chord-following with a Yamaha keyboard, " +
+                        "open source, and no paywall.",
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.padding(vertical = 12.dp),
+                )
             }
-            // Bottom: sequencer across the full width.
-            SequencerRow()
         }
     }
 }

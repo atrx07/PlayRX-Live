@@ -34,15 +34,21 @@ import kotlin.math.sin
 object SampleBank {
     const val SAMPLE_RATE = 44100
 
-    val PAD_NAMES = listOf(
-        "Kick", "Snare", "Hat", "Open Hat", "Clap", "Tom", "Rim", "Crash",
-        "Bass C", "Bass D", "Bass E", "Bass F", "Bass G", "Bass A", "Bass B", "Bass C+",
-        "Drum Loop", "Hats Loop", "Bass Loop", "Synth Loop",
-        "Perc Loop", "Chord Loop", "Fill Loop", "Groove Loop",
-    )
+    // 8x6 grid, familiar to Remixlive users, PlayRX's own sounds and names.
+    // Columns are instrument types; rows are variations 1..6.
+    // Pad index = row * 8 + column.
+    const val COLUMNS = 8
+    const val ROWS = 6
+    const val PAD_COUNT = 48
+    val COLUMN_NAMES = listOf("Kick", "Snare", "Tops", "Bass", "Synth", "Pad", "Vox", "FX")
+    val PAD_NAMES: List<String> = (0 until ROWS).flatMap { row ->
+        COLUMN_NAMES.map { col -> "$col ${row + 1}" }
+    }
 
-    fun isLoopPad(pad: Int): Boolean = pad in 16..23
-    fun isDrumPad(pad: Int): Boolean = pad in 0..7
+    fun columnOf(pad: Int): Int = pad % COLUMNS
+    fun rowOf(pad: Int): Int = pad / COLUMNS
+    fun isLoopPad(pad: Int): Boolean = columnOf(pad) in listOf(5, 7)
+    fun isDrumPad(pad: Int): Boolean = columnOf(pad) in listOf(0, 1, 2)
 
     // Internal (non-grid) samples used by loop patterns.
     const val SYNTH_STAB = 100
@@ -86,91 +92,9 @@ object SampleBank {
     }
 
     fun oneShot(index: Int): FloatArray {
+        if (index in 0 until PAD_COUNT) return oneShotPad(index)
         return when (index) {
-            0 -> { // Kick: pitch drop 150 -> 50 Hz
-                val n = (0.35 * SAMPLE_RATE).toInt()
-                val out = FloatArray(n)
-                var phase = 0.0
-                for (i in out.indices) {
-                    val t = i.toDouble() / SAMPLE_RATE
-                    val freq = 50 + 100 * exp(-t * 25)
-                    phase += 2 * PI * freq / SAMPLE_RATE
-                    out[i] = (sin(phase) * exp(-t * 9)).toFloat()
-                }
-                out
-            }
-            1 -> { // Snare: noise + 190 Hz body
-                val noise = noiseBuffer(0.25, 11)
-                val body = sineNote(190.0, 0.25, 18.0)
-                val out = FloatArray(noise.size)
-                for (i in out.indices) {
-                    val t = i.toDouble() / SAMPLE_RATE
-                    out[i] = (noise[i] * exp(-t * 14).toFloat() * 0.7f + body[i] * 0.6f)
-                }
-                out
-            }
-            2 -> { // Closed hat
-                val noise = noiseBuffer(0.06, 22)
-                val out = FloatArray(noise.size)
-                for (i in out.indices) {
-                    val t = i.toDouble() / SAMPLE_RATE
-                    out[i] = (noise[i] * exp(-t * 90)).toFloat()
-                }
-                out
-            }
-            3 -> { // Open hat
-                val noise = noiseBuffer(0.35, 33)
-                val out = FloatArray(noise.size)
-                for (i in out.indices) {
-                    val t = i.toDouble() / SAMPLE_RATE
-                    out[i] = (noise[i] * exp(-t * 12)).toFloat()
-                }
-                out
-            }
-            4 -> { // Clap: burst noise
-                val noise = noiseBuffer(0.25, 44)
-                val out = FloatArray(noise.size)
-                for (i in out.indices) {
-                    val t = i.toDouble() / SAMPLE_RATE
-                    val burst = if (t < 0.05) 1f else 0.7f
-                    out[i] = (noise[i] * exp(-t * 16) * burst).toFloat()
-                }
-                out
-            }
-            5 -> { // Tom: 120 -> 80 Hz
-                val n = (0.3 * SAMPLE_RATE).toInt()
-                val out = FloatArray(n)
-                var phase = 0.0
-                for (i in out.indices) {
-                    val t = i.toDouble() / SAMPLE_RATE
-                    val freq = 80 + 40 * exp(-t * 20)
-                    phase += 2 * PI * freq / SAMPLE_RATE
-                    out[i] = (sin(phase) * exp(-t * 12)).toFloat()
-                }
-                out
-            }
-            6 -> sineNote(1700.0, 0.05, 120.0) // Rim
-            7 -> { // Crash: long bright noise
-                val noise = noiseBuffer(1.2, 55)
-                val out = FloatArray(noise.size)
-                for (i in out.indices) {
-                    val t = i.toDouble() / SAMPLE_RATE
-                    out[i] = (noise[i] * exp(-t * 3)).toFloat()
-                }
-                out
-            }
-            in 8..15 -> { // Bass notes: sine + 2nd harmonic
-                val freq = BASS_FREQS[index - 8]
-                val n = (0.5 * SAMPLE_RATE).toInt()
-                val out = FloatArray(n)
-                for (i in out.indices) {
-                    val t = i.toDouble() / SAMPLE_RATE
-                    val v = sin(2 * PI * freq * t) + 0.3 * sin(2 * PI * freq * 2 * t)
-                    out[i] = (v * exp(-t * 5) * 0.7).toFloat()
-                }
-                out
-            }
-            SYNTH_STAB -> { // C major stab
+            SYNTH_STAB -> { // C major stab (legacy internal sample)
                 val n = (0.6 * SAMPLE_RATE).toInt()
                 val out = FloatArray(n)
                 val freqs = doubleArrayOf(261.63, 329.63, 392.00)
@@ -182,7 +106,7 @@ object SampleBank {
                 }
                 out
             }
-            PAD_CHORD -> { // Sustained C major pad, slow attack
+            PAD_CHORD -> {
                 val n = (2.0 * SAMPLE_RATE).toInt()
                 val out = FloatArray(n)
                 val freqs = doubleArrayOf(261.63, 329.63, 392.00, 523.25)
@@ -195,7 +119,7 @@ object SampleBank {
                 }
                 out
             }
-            DRONE -> { // Low drone
+            DRONE -> {
                 val n = (2.0 * SAMPLE_RATE).toInt()
                 val out = FloatArray(n)
                 for (i in out.indices) {
@@ -208,17 +132,116 @@ object SampleBank {
         }
     }
 
-    /** Loop patterns: pad -> list of (step 0..15, one-shot sample index). */
-    fun loopPattern(pad: Int): List<Pair<Int, Int>> = when (pad) {
-        16 -> listOf(0 to 0, 4 to 0, 8 to 0, 12 to 0, 4 to 1, 12 to 1, 0 to 2, 2 to 2, 4 to 2, 6 to 2, 8 to 2, 10 to 2, 12 to 2, 14 to 2, 14 to 3)
-        17 -> (0..15 step 2).map { it to 2 } + listOf(4 to 3, 12 to 3)
-        18 -> listOf(0 to 8, 3 to 8, 6 to 12, 8 to 13, 10 to 8, 12 to 11, 14 to 12)
-        19 -> listOf(0 to SYNTH_STAB, 8 to SYNTH_STAB, 0 to PAD_CHORD)
-        20 -> listOf(2 to 6, 6 to 6, 10 to 6, 14 to 6, 7 to 5, 15 to 5, 4 to 4, 12 to 4)
-        21 -> listOf(0 to PAD_CHORD, 8 to SYNTH_STAB)
-        22 -> listOf(12 to 0, 13 to 0, 14 to 1, 15 to 5, 0 to 7)
-        23 -> listOf(0 to 0, 3 to 0, 6 to 0, 10 to 0, 4 to 1, 12 to 1, 1 to 2, 5 to 2, 9 to 2, 13 to 2, 8 to DRONE)
-        else -> emptyList()
+    private fun oneShotPad(pad: Int): FloatArray {
+        val col = columnOf(pad)
+        val row = rowOf(pad)
+        return when (col) {
+            0 -> { // Kick: pitch drop, row varies depth/decay
+                val n = (0.35 * SAMPLE_RATE).toInt()
+                val out = FloatArray(n)
+                var phase = 0.0
+                for (i in out.indices) {
+                    val t = i.toDouble() / SAMPLE_RATE
+                    val freq = 50 + (100 - row * 10) * exp(-t * (25 - row * 2))
+                    phase += 2 * PI * freq / SAMPLE_RATE
+                    out[i] = (sin(phase) * exp(-t * (9 - row))).toFloat()
+                }
+                out
+            }
+            1 -> { // Snare: noise + body
+                val noise = noiseBuffer(0.25, 11 + row)
+                val body = sineNote(190.0 - row * 10, 0.25, 18.0)
+                val out = FloatArray(noise.size)
+                for (i in out.indices) {
+                    val t = i.toDouble() / SAMPLE_RATE
+                    out[i] = (noise[i] * exp(-t * 14).toFloat() * 0.7f + body[i] * 0.6f)
+                }
+                out
+            }
+            2 -> { // Tops: even rows closed hat, odd rows open hat
+                val noise = noiseBuffer(if (row % 2 == 0) 0.06 else 0.35, 22 + row)
+                val out = FloatArray(noise.size)
+                for (i in out.indices) {
+                    val t = i.toDouble() / SAMPLE_RATE
+                    out[i] = (noise[i] * exp(-t * (if (row % 2 == 0) 90.0 else 12.0))).toFloat()
+                }
+                out
+            }
+            3 -> { // Bass: C D E F G A across rows
+                val freq = BASS_FREQS[row]
+                val n = (0.5 * SAMPLE_RATE).toInt()
+                val out = FloatArray(n)
+                for (i in out.indices) {
+                    val t = i.toDouble() / SAMPLE_RATE
+                    val v = sin(2 * PI * freq * t) + 0.3 * sin(2 * PI * freq * 2 * t)
+                    out[i] = (v * exp(-t * 5) * 0.7).toFloat()
+                }
+                out
+            }
+            4 -> { // Synth stab: root transposed by row (C scale)
+                val root = BASS_FREQS[row] * 4
+                val n = (0.6 * SAMPLE_RATE).toInt()
+                val out = FloatArray(n)
+                val freqs = doubleArrayOf(root, root * 1.25, root * 1.5)
+                for (i in out.indices) {
+                    val t = i.toDouble() / SAMPLE_RATE
+                    var v = 0.0
+                    for (f in freqs) v += sin(2 * PI * f * t)
+                    out[i] = (v / 3.0 * exp(-t * 6)).toFloat()
+                }
+                out
+            }
+            5 -> { // Pad chord: sustained, row varies root
+                val root = BASS_FREQS[row] * 4
+                val n = (2.0 * SAMPLE_RATE).toInt()
+                val out = FloatArray(n)
+                val freqs = doubleArrayOf(root, root * 1.25, root * 1.5, root * 2)
+                for (i in out.indices) {
+                    val t = i.toDouble() / SAMPLE_RATE
+                    val attack = minOf(1.0, t / 0.15)
+                    var v = 0.0
+                    for (f in freqs) v += sin(2 * PI * f * t)
+                    out[i] = (v / 4.0 * attack * exp(-t * 1.2)).toFloat()
+                }
+                out
+            }
+            6 -> { // Vox: sine + vibrato, row varies pitch
+                val freq = 300.0 + row * 50
+                val n = (0.8 * SAMPLE_RATE).toInt()
+                val out = FloatArray(n)
+                for (i in out.indices) {
+                    val t = i.toDouble() / SAMPLE_RATE
+                    val vib = sin(2 * PI * 5 * t) * 8
+                    out[i] = (sin(2 * PI * (freq + vib) * t) * exp(-t * 3)).toFloat()
+                }
+                out
+            }
+            7 -> { // FX: noise sweep, row varies length
+                val noise = noiseBuffer(0.4 + row * 0.2, 55 + row)
+                val out = FloatArray(noise.size)
+                for (i in out.indices) {
+                    val t = i.toDouble() / SAMPLE_RATE
+                    out[i] = (noise[i] * exp(-t * (3 + row))).toFloat()
+                }
+                out
+            }
+            else -> FloatArray(0)
+        }
+    }
+
+    /** Loop patterns: loop pad -> list of (step 0..15, pad sample index). */
+    fun loopPattern(pad: Int): List<Pair<Int, Int>> {
+        if (!isLoopPad(pad)) return emptyList()
+        val row = rowOf(pad)
+        val kick = row * COLUMNS + 0
+        val snare = row * COLUMNS + 1
+        val tops = row * COLUMNS + 2
+        val bass = row * COLUMNS + 3
+        val synth = row * COLUMNS + 4
+        return when (columnOf(pad)) {
+            5 -> listOf(0 to kick, 4 to kick, 8 to kick, 12 to kick, 4 to snare, 12 to snare, 0 to tops, 2 to tops, 4 to tops, 6 to tops, 8 to tops, 10 to tops, 12 to tops, 14 to tops, 0 to synth, 8 to bass)
+            else -> listOf(0 to kick, 3 to kick, 6 to kick, 10 to kick, 4 to snare, 12 to snare, 1 to tops, 5 to tops, 9 to tops, 13 to tops, 0 to synth)
+        }
     }
 }
 
@@ -232,46 +255,66 @@ class PlaybackEngine {
     var onStepChanged: ((Int) -> Unit)? = null
     var onLoopsChanged: ((Set<Int>) -> Unit)? = null
 
-    // Sequencer: drum pad 0..7 -> 16 steps
-    private val pattern = Array(8) { BooleanArray(16) }
+    // Sequencer: any pad -> 16 steps (UI edits drum pads)
+    private val pattern = Array(SampleBank.PAD_COUNT) { BooleanArray(16) }
     private val activeLoops = mutableSetOf<Int>()
 
-    // Full-pad mixer: per-pad volume, mute, solo (pads 0..23).
-    private val padVolumes = FloatArray(24) { 1f }
-    private val padMuted = BooleanArray(24)
-    private val padSolo = BooleanArray(24)
+    // Full-pad mixer: per-pad volume, mute, solo (48 pads) plus
+    // per-column mixer (8 instrument columns, like a channel strip).
+    private val padVolumes = FloatArray(SampleBank.PAD_COUNT) { 1f }
+    private val padMuted = BooleanArray(SampleBank.PAD_COUNT)
+    private val padSolo = BooleanArray(SampleBank.PAD_COUNT)
+    private val columnVolumes = FloatArray(SampleBank.COLUMNS) { 1f }
+    private val columnMuted = BooleanArray(SampleBank.COLUMNS)
+    private val columnSolo = BooleanArray(SampleBank.COLUMNS)
 
     fun setPadVolume(pad: Int, volume: Float) {
-        if (pad in 0..23) padVolumes[pad] = volume.coerceIn(0f, 1f)
+        if (pad in 0 until SampleBank.PAD_COUNT) padVolumes[pad] = volume.coerceIn(0f, 1f)
     }
 
-    fun getPadVolume(pad: Int): Float = if (pad in 0..23) padVolumes[pad] else 1f
+    fun getPadVolume(pad: Int): Float = if (pad in 0 until SampleBank.PAD_COUNT) padVolumes[pad] else 1f
     fun setPadMuted(pad: Int, muted: Boolean) {
-        if (pad in 0..23) padMuted[pad] = muted
+        if (pad in 0 until SampleBank.PAD_COUNT) padMuted[pad] = muted
     }
 
-    fun isPadMuted(pad: Int): Boolean = pad in 0..23 && padMuted[pad]
+    fun isPadMuted(pad: Int): Boolean = pad in 0 until SampleBank.PAD_COUNT && padMuted[pad]
     fun setPadSolo(pad: Int, solo: Boolean) {
-        if (pad in 0..23) padSolo[pad] = solo
+        if (pad in 0 until SampleBank.PAD_COUNT) padSolo[pad] = solo
     }
 
-    fun isPadSolo(pad: Int): Boolean = pad in 0..23 && padSolo[pad]
+    fun isPadSolo(pad: Int): Boolean = pad in 0 until SampleBank.PAD_COUNT && padSolo[pad]
+    fun setColumnVolume(col: Int, volume: Float) {
+        if (col in 0 until SampleBank.COLUMNS) columnVolumes[col] = volume.coerceIn(0f, 1f)
+    }
 
-    /** Effective volume for a pad, applying mute/solo rules. */
+    fun getColumnVolume(col: Int): Float = if (col in 0 until SampleBank.COLUMNS) columnVolumes[col] else 1f
+    fun setColumnMuted(col: Int, muted: Boolean) {
+        if (col in 0 until SampleBank.COLUMNS) columnMuted[col] = muted
+    }
+
+    fun isColumnMuted(col: Int): Boolean = col in 0 until SampleBank.COLUMNS && columnMuted[col]
+    fun setColumnSolo(col: Int, solo: Boolean) {
+        if (col in 0 until SampleBank.COLUMNS) columnSolo[col] = solo
+    }
+
+    fun isColumnSolo(col: Int): Boolean = col in 0 until SampleBank.COLUMNS && columnSolo[col]
+
+    /** Effective volume for a pad, applying pad + column mute/solo rules. */
     private fun effectiveVolume(pad: Int, base: Float): Float {
-        if (pad !in 0..23) return base
-        if (padMuted[pad]) return 0f
-        val anySolo = padSolo.any { it }
-        if (anySolo && !padSolo[pad]) return 0f
-        return base * padVolumes[pad]
+        if (pad !in 0 until SampleBank.PAD_COUNT) return base
+        val col = SampleBank.columnOf(pad)
+        if (padMuted[pad] || columnMuted[col]) return 0f
+        val anySolo = padSolo.any { it } || columnSolo.any { it }
+        if (anySolo && !padSolo[pad] && !columnSolo[col]) return 0f
+        return base * padVolumes[pad] * columnVolumes[col]
     }
 
     fun setStep(track: Int, step: Int, on: Boolean) {
-        if (track in 0..7 && step in 0..15) pattern[track][step] = on
+        if (track in 0 until SampleBank.PAD_COUNT && step in 0..15) pattern[track][step] = on
     }
 
     fun getStep(track: Int, step: Int): Boolean =
-        if (track in 0..7 && step in 0..15) pattern[track][step] else false
+        if (track in 0 until SampleBank.PAD_COUNT && step in 0..15) pattern[track][step] else false
 
     fun activeLoopPads(): Set<Int> = activeLoops.toSet()
 
@@ -363,7 +406,7 @@ class PlaybackEngine {
     }
 
     private fun triggerSample(index: Int, volume: Float = 0.9f, sourcePad: Int = -1) {
-        val pad = if (sourcePad in 0..23) sourcePad else index
+        val pad = if (sourcePad in 0 until SampleBank.PAD_COUNT) sourcePad else index
         val vol = effectiveVolume(pad, volume)
         if (vol > 0f) pending.add(Voice(sample(index), 0, vol))
     }
@@ -390,7 +433,7 @@ class PlaybackEngine {
                 if (step != lastStep) {
                     lastStep = step
                     onStepChanged?.invoke(step)
-                    for (trk in 0..7) {
+                    for (trk in 0 until SampleBank.PAD_COUNT) {
                         if (pattern[trk][step]) triggerSample(trk, 0.9f, trk)
                     }
                     for (loopPad in activeLoops.toList()) {
