@@ -66,13 +66,16 @@ jobs:
           if-no-files-found: error
 
   # Visual QA screenshots (Paparazzi, JVM-only, no emulator needed).
-  # Manual-only: it never runs on push/PR, so it cannot break the
-  # normal build. Paparazzi record writes goldens to
+  # Automatic: runs on every push to main and every PR, alongside the
+  # build job (separate job, so a screenshots failure cannot break the
+  # APK build). Paparazzi record writes goldens to
   # app/src/test/snapshots/ (not build/) — that is the artifact path
   # below, plus the HTML report. The agent downloads the artifact,
-  # inspects the PNGs, and reports/fixes from them.
+  # inspects the PNGs, and reports/fixes from them. Artifact retention
+  # is 7 days so old screenshots don't eat storage.
+  # Flipped from manual-only on 2026-10-31 after the first manual run
+  # proved the job produces the expected 16 screenshots.
   screenshots:
-    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -100,3 +103,4 @@ jobs:
             app/src/test/snapshots/
             app/build/reports/paparazzi/
           if-no-files-found: error
+          retention-days: 7
