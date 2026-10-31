@@ -58,6 +58,7 @@ class MainActivity : ComponentActivity() {
     private var patternVersion by mutableStateOf(0)
     private var mixerVersion by mutableStateOf(0)
     private var selectedTab by mutableStateOf("LOOP")
+    private var selectedPanel by mutableStateOf("MIXER")
 
     private fun currentState(): PlayRxState {
         // Read the version counters so pad/column/step edits recompose.
@@ -77,6 +78,7 @@ class MainActivity : ComponentActivity() {
             selectedPad = selectedPad,
             editPattern = editPattern,
             selectedTab = selectedTab,
+            selectedPanel = selectedPanel,
             padVolumes = List(SampleBank.PAD_COUNT) { engine.getPadVolume(it) },
             padMuted = List(SampleBank.PAD_COUNT) { engine.isPadMuted(it) },
             padSolo = List(SampleBank.PAD_COUNT) { engine.isPadSolo(it) },
@@ -135,6 +137,7 @@ class MainActivity : ComponentActivity() {
         },
         onEditToggle = { editPattern = !editPattern },
         onTabSelect = { selectedTab = it },
+        onPanelSelect = { selectedPanel = it },
         onPadVolume = { pad, volume ->
             engine.setPadVolume(pad, volume)
             mixerVersion++

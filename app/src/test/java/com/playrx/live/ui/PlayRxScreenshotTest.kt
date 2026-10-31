@@ -72,6 +72,9 @@ private fun editMixerState(): PlayRxState {
         midiStatus = "PSR-SX700 connected via USB",
         editPattern = true,
         selectedPad = 5,
+        // Bottom panel on EDIT: proves Edit is its own switchable
+        // panel below the grid, not a side column in LOOP.
+        selectedPanel = "EDIT",
         padVolumes = padVolumes,
         padMuted = padMuted,
         columnSolo = columnSolo,

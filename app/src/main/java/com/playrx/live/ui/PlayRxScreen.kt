@@ -38,11 +38,20 @@ import com.playrx.live.audio.SampleBank
  * with no Activity, engine, or MIDI device, and lets the app and the
  * screenshot tests share one implementation (no drift between them).
  *
- * Layout (UI fix round, after Paparazzi run #25):
- * - Landscape (primary, music-rest use): top bar, 8-column pad grid
- *   left (rounded-rectangle pads, height fitted so all 6 rows show),
- *   240dp side panel right. Sequencer is DRUM-tab only, not at the
- *   bottom of LOOP — that row was what cut the grid in half.
+ * Layout (Tutorial Tour restructure, 2026-10-31 — see
+ * docs/UI-STRUCTURE.md):
+ * - Top tabs only: LOOP, SEQ, DRUM, SONG. Edit and Mixer are NOT
+ *   top tabs and NOT a side column inside LOOP.
+ * - Below the main view, a switchable bottom panel, chosen by the
+ *   EDIT / MIXER / FX / SAMPLES buttons: EDIT = selected pad,
+ *   MIXER = VOLUMES (per-column faders + M/S, plus tempo/master),
+ *   FX = delay for now (beat-repeat / XY pad next), SAMPLES =
+ *   collection / import placeholder (own manifest, next).
+ * - Landscape (primary, music-rest use): top bar, full-width
+ *   8-column grid (rounded-rectangle pads, height fitted so all
+ *   6 rows show), then panel switch + bottom panel. No side
+ *   panel — the side panel was what squeezed the grid and hid
+ *   Edit/Mixer below the fold.
  * - Portrait (handheld secondary): stacked, scrollable column, grid
  *   wrapped to 4 columns via non-lazy rows (a lazy grid inside a
  *   scrollable Column crashes: infinite-height measurement).
@@ -187,16 +196,60 @@ private fun TransportButtons(state: PlayRxState, actions: PlayRxActions) {
 }
 
 @Composable
-private fun MixControls(state: PlayRxState, actions: PlayRxActions) {
+private fun TempoControls(state: PlayRxState, actions: PlayRxActions) {
     Text("BPM: ${state.bpm.toInt()}")
     Slider(value = state.bpm, onValueChange = actions.onBpmChange, valueRange = 60f..180f)
-    Text("Volume: ${(state.masterVolume * 100).toInt()}%")
+    Text("Master volume: ${(state.masterVolume * 100).toInt()}%")
     Slider(value = state.masterVolume, onValueChange = actions.onVolumeChange, valueRange = 0f..1f)
+}
+
+@Composable
+private fun PanelSwitch(state: PlayRxState, actions: PlayRxActions) {
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text("Delay FX")
-        Switch(checked = state.delayOn, onCheckedChange = actions.onDelayChange)
-        Button(onClick = actions.onEditToggle) {
-            Text(if (state.editPattern) "Edit: On" else "Edit pattern")
+        for (panel in listOf("EDIT", "MIXER", "FX", "SAMPLES")) {
+            Button(
+                onClick = { actions.onPanelSelect(panel) },
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = if (state.selectedPanel == panel) Color(0xFFFFC107) else Color(0xFF7E57C2)
+                ),
+            ) {
+                Text(panel)
+            }
+        }
+    }
+}
+
+@Composable
+private fun BottomPanel(state: PlayRxState, actions: PlayRxActions, modifier: Modifier = Modifier) {
+    Column(modifier = modifier) {
+        when (state.selectedPanel) {
+            "EDIT" -> {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(onClick = actions.onEditToggle) {
+                        Text(if (state.editPattern) "Edit: On — tap a pad to select" else "Edit pattern")
+                    }
+                }
+                PadEditPanel(state, actions)
+            }
+            "FX" -> {
+                Text("FX — Delay for now; beat-repeat and XY pad come next.", style = MaterialTheme.typography.bodySmall)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Delay FX")
+                    Switch(checked = state.delayOn, onCheckedChange = actions.onDelayChange)
+                }
+            }
+            "SAMPLES" -> {
+                Text(
+                    "Samples / Collection — next: import your own WAV/OGG " +
+                        "in PlayRX's own manifest format. No copied packs.",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+            else -> {
+                Text("Mixer — VOLUMES", style = MaterialTheme.typography.bodySmall)
+                TempoControls(state, actions)
+                ColumnMixer(state, actions)
+            }
         }
     }
 }
@@ -288,16 +341,17 @@ private fun PortraitContent(state: PlayRxState, actions: PlayRxActions) {
             TransportButtons(state, actions)
         }
         TopTabs(state, actions)
-        MixControls(state, actions)
         if (state.selectedTab == "LOOP") {
             PadGridRows(state, actions, columns = 4, modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp))
-            PadEditPanel(state, actions)
-            ColumnMixer(state, actions)
         } else if (state.selectedTab == "DRUM") {
             SequencerRow(state, actions)
         } else {
             PlaceholderTab(state)
         }
+        // Switchable bottom panel, NOT stacked inside LOOP: Edit and
+        // Mixer are their own panels (Tutorial Tour structure).
+        PanelSwitch(state, actions)
+        BottomPanel(state, actions, modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp))
         Text(
             "48 pads, 8 instrument columns x 6 variations. All sounds are synthesized " +
                 "in the app — no sample packs needed. Pad and FX columns are loop pads " +
@@ -322,40 +376,34 @@ private fun LandscapeContent(state: PlayRxState, actions: PlayRxActions) {
         }
         TopTabs(state, actions)
         if (state.selectedTab == "LOOP") {
-            // Sequencer lives on the DRUM tab only (it used to sit at
-            // the bottom of LOOP too, eating the height the grid needed
-            // and leaving row 3 sliced in half on phone landscape).
-            // Pad height is derived from the available height so all
-            // 6 rows fit exactly, with no scrolling and no cut-off row:
-            // phone landscape pads become wide rectangles, tablet
+            // Full-width grid: no side panel any more. Pad height is
+            // derived from the available height so all 6 rows fit
+            // exactly, with no scrolling and no cut-off row: phone
+            // landscape pads become wide rectangles, tablet
             // landscape pads stay near-square — both intentional.
             BoxWithConstraints(modifier = Modifier.weight(1f).fillMaxWidth().padding(vertical = 8.dp)) {
                 val rows = 6
                 val spacing = 6.dp
                 val padHeight = (maxHeight - spacing * (rows - 1)) / rows
-                Row(modifier = Modifier.fillMaxSize()) {
-                    PadGrid(
-                        state, actions, columns = 8, padHeight = padHeight,
-                        modifier = Modifier.weight(1f).fillMaxHeight().padding(end = 12.dp),
-                    )
-                    Column(
-                        modifier = Modifier.width(240.dp).fillMaxHeight().verticalScroll(rememberScrollState()),
-                    ) {
-                        MixControls(state, actions)
-                        Text(
-                            "8 columns x 6 variations = 48 pads. Pad + FX columns loop.",
-                            style = MaterialTheme.typography.bodySmall,
-                            modifier = Modifier.padding(top = 8.dp),
-                        )
-                        PadEditPanel(state, actions)
-                        ColumnMixer(state, actions)
-                    }
-                }
+                PadGrid(
+                    state, actions, columns = 8, padHeight = padHeight,
+                    modifier = Modifier.fillMaxSize(),
+                )
             }
+            Text(
+                "8 columns x 6 variations = 48 pads. Pad + FX columns loop.",
+                style = MaterialTheme.typography.bodySmall,
+            )
         } else if (state.selectedTab == "DRUM") {
             SequencerRow(state, actions)
         } else {
             PlaceholderTab(state)
         }
+        // Switchable bottom panel, below the main view.
+        PanelSwitch(state, actions)
+        BottomPanel(
+            state, actions,
+            modifier = Modifier.fillMaxWidth().height(170.dp).verticalScroll(rememberScrollState()).padding(vertical = 8.dp),
+        )
     }
 }

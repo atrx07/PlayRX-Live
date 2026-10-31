@@ -22,6 +22,12 @@ data class PlayRxState(
     val selectedPad: Int = 0,
     val editPattern: Boolean = false,
     val selectedTab: String = "LOOP",
+    /** Lower panel switched by the right-edge icons in Remixlive's
+     * structure: EDIT, MIXER, FX, or SAMPLES. This is NOT a top tab
+     * and NOT part of LOOP's side column — it is a switchable panel
+     * below the main view (see docs/UI-STRUCTURE.md, from the
+     * 2026-10-31 Tutorial Tour watch-through). */
+    val selectedPanel: String = "MIXER",
     val padVolumes: List<Float> = List(SampleBank.PAD_COUNT) { 1f },
     val padMuted: List<Boolean> = List(SampleBank.PAD_COUNT) { false },
     val padSolo: List<Boolean> = List(SampleBank.PAD_COUNT) { false },
@@ -43,6 +49,7 @@ data class PlayRxActions(
     val onDelayChange: (Boolean) -> Unit = {},
     val onEditToggle: () -> Unit = {},
     val onTabSelect: (String) -> Unit = {},
+    val onPanelSelect: (String) -> Unit = {},
     val onPadVolume: (Int, Float) -> Unit = { _, _ -> },
     val onPadMuteToggle: (Int) -> Unit = {},
     val onPadSoloToggle: (Int) -> Unit = {},
