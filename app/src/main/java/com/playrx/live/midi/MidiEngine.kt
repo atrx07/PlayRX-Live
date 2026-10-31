@@ -31,7 +31,11 @@ class MidiEngine(private val context: Context) {
 
     private val heldNotes = mutableSetOf<Int>()
     private var openDevice: MidiDevice? = null
-    private var openPort: android.media.midi.MidiInputPort? = null
+    // NOTE: to RECEIVE from a keyboard you open an OUTPUT port on the device
+    // (a MidiSender) and connect your receiver to it. An input port is for
+    // SENDING to the device, and it has no connect() method — using it here
+    // was a compile error (and would have been wrong at runtime too).
+    private var openPort: android.media.midi.MidiOutputPort? = null
 
     private val receiver = object : MidiReceiver() {
         override fun onSend(msg: ByteArray, offset: Int, count: Int, timestamp: Long) {
@@ -76,7 +80,7 @@ class MidiEngine(private val context: Context) {
     fun open(deviceInfo: MidiDeviceInfo) {
         midiManager?.openDevice(deviceInfo, { device ->
             openDevice = device
-            openPort = device?.openInputPort(0)
+            openPort = device?.openOutputPort(0)
             openPort?.connect(receiver)
             Handler(Looper.getMainLooper()).post {
                 onDeviceStatus?.invoke("Connected: ${deviceInfo.properties.getString(MidiDeviceInfo.PROPERTY_NAME)}")
@@ -85,6 +89,7 @@ class MidiEngine(private val context: Context) {
     }
 
     fun close() {
+        runCatching { openPort?.disconnect(receiver) }
         runCatching { openPort?.close() }
         runCatching { openDevice?.close() }
         openPort = null
