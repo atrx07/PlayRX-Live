@@ -15,12 +15,21 @@ Phase 0 scaffold. The pad grid, MIDI plumbing, and chord detector in this repo a
 - **Parallel backing:** The app does not replace the keyboard's styles. It listens to what you play, detects the chord, and follows it — so app loops and keyboard backing stay in the same key/chord.
 - **All features free:** No premium tier. Sample packs in this repo must be CC0 or otherwise clearly licensed — never copied from a commercial app.
 
+## Get the APK (no Android Studio needed)
+
+Every push to `main` runs the **Android Build** GitHub Action, which builds a debug APK and uploads it as an artifact:
+
+1. Open the repo on GitHub → **Actions** tab → latest successful **Android Build** run.
+2. Scroll to **Artifacts** → download **PlayRX-Live-debug** (a zip containing `app-debug.apk`).
+3. On your test Android phone, open the APK and allow "Install unknown apps" for your browser/files app when asked.
+4. Connect a PSR-SX keyboard with a USB OTG cable to the phone/tablet's USB port, then pick the device in the app's MIDI screen. Android will ask for USB permission — allow it.
+
 ## Quick start (Android Studio)
 
 1. Open this folder in Android Studio (Hedgehog or newer).
 2. Connect an Android device (Android 8.0+ recommended for low-latency audio).
 3. Run the `app` configuration.
-4. Connect a PSR-SX keyboard with a USB OTG cable to the phone/tablet's USB port, then pick the device in the app's MIDI screen. Android will ask for USB permission — allow it.
+4. Connect a PSR-SX keyboard as above.
 
 ## Project layout
 
