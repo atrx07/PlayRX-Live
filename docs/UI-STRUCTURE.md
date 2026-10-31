@@ -91,10 +91,14 @@ the grid and hid Edit/Mixer below the fold. Never restore it.
 - `PlayRxState.selectedTab`: "LOOP" | "SEQ" | "DRUM" | "SONG".
 - `PlayRxState.selectedPanel`: "EDIT" | "MIXER" | "FX" | "SAMPLES".
 - `PlayRxScreen`: header (title, MIDI status, chord, transport),
-  top tabs, full-width main view, panel switch buttons, then
-  the selected bottom panel. Landscape: grid height is fitted
-  so all 6 rows show, bottom panel is a fixed-height scroll
-  area. Portrait: stacked scroll, grid wrapped to 4 columns.
+  top tabs, main view, panel switch buttons, then the selected
+  panel — ONE panel at a time, never Edit+Mixer stacked.
+  Landscape: grid left, switchable panel right (260dp), grid
+  height fitted so all 6 rows show. A bottom panel was tried
+  first in landscape and rejected: on phone landscape it
+  collapsed the grid to ~0 height (fixed 170dp panel + header
+  + tabs in ~412dp of height). Portrait: stacked scroll, grid
+  wrapped to 4 columns, panel below the grid.
 - Screenshot states in `PlayRxScreenshotTest`: loopDefault and
   loopPlaying use the default MIXER panel; loopEditMixer uses
   the EDIT panel — so both panels are visually proven every run.

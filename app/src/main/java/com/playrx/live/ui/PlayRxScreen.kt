@@ -47,11 +47,14 @@ import com.playrx.live.audio.SampleBank
  *   MIXER = VOLUMES (per-column faders + M/S, plus tempo/master),
  *   FX = delay for now (beat-repeat / XY pad next), SAMPLES =
  *   collection / import placeholder (own manifest, next).
- * - Landscape (primary, music-rest use): top bar, full-width
- *   8-column grid (rounded-rectangle pads, height fitted so all
- *   6 rows show), then panel switch + bottom panel. No side
- *   panel — the side panel was what squeezed the grid and hid
- *   Edit/Mixer below the fold.
+ * - Landscape (primary, music-rest use): top bar, 8-column grid
+ *   (rounded-rectangle pads, height fitted so all 6 rows show)
+ *   with a switchable panel on the right (EDIT / MIXER / FX /
+ *   SAMPLES, one at a time — NOT all stacked). A bottom panel
+ *   in phone landscape collapsed the grid to ~0 height (Paparazzi
+ *   panel run, 2026-10-31): phone landscape is only ~412dp tall,
+ *   and a fixed 170dp panel + header + tabs left the grid ~40dp.
+ *   The right-side panel keeps the grid's full height.
  * - Portrait (handheld secondary): stacked, scrollable column, grid
  *   wrapped to 4 columns via non-lazy rows (a lazy grid inside a
  *   scrollable Column crashes: infinite-height measurement).
@@ -376,19 +379,26 @@ private fun LandscapeContent(state: PlayRxState, actions: PlayRxActions) {
         }
         TopTabs(state, actions)
         if (state.selectedTab == "LOOP") {
-            // Full-width grid: no side panel any more. Pad height is
-            // derived from the available height so all 6 rows fit
-            // exactly, with no scrolling and no cut-off row: phone
-            // landscape pads become wide rectangles, tablet
-            // landscape pads stay near-square — both intentional.
-            BoxWithConstraints(modifier = Modifier.weight(1f).fillMaxWidth().padding(vertical = 8.dp)) {
-                val rows = 6
-                val spacing = 6.dp
-                val padHeight = (maxHeight - spacing * (rows - 1)) / rows
-                PadGrid(
-                    state, actions, columns = 8, padHeight = padHeight,
-                    modifier = Modifier.fillMaxSize(),
-                )
+            // Grid left, ONE switchable panel right. The old layout
+            // stacked BPM + Edit + Mixer all at once in the side
+            // column; now only the selected panel shows, switched
+            // by EDIT / MIXER / FX / SAMPLES above it.
+            Row(modifier = Modifier.weight(1f).fillMaxWidth().padding(vertical = 8.dp)) {
+                BoxWithConstraints(modifier = Modifier.weight(1f).fillMaxHeight().padding(end = 12.dp)) {
+                    val rows = 6
+                    val spacing = 6.dp
+                    val padHeight = (maxHeight - spacing * (rows - 1)) / rows
+                    PadGrid(
+                        state, actions, columns = 8, padHeight = padHeight,
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                }
+                Column(
+                    modifier = Modifier.width(260.dp).fillMaxHeight().verticalScroll(rememberScrollState()),
+                ) {
+                    PanelSwitch(state, actions)
+                    BottomPanel(state, actions, modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp))
+                }
             }
             Text(
                 "8 columns x 6 variations = 48 pads. Pad + FX columns loop.",
@@ -396,14 +406,18 @@ private fun LandscapeContent(state: PlayRxState, actions: PlayRxActions) {
             )
         } else if (state.selectedTab == "DRUM") {
             SequencerRow(state, actions)
+            PanelSwitch(state, actions)
+            BottomPanel(
+                state, actions,
+                modifier = Modifier.fillMaxWidth().height(170.dp).verticalScroll(rememberScrollState()).padding(vertical = 8.dp),
+            )
         } else {
             PlaceholderTab(state)
+            PanelSwitch(state, actions)
+            BottomPanel(
+                state, actions,
+                modifier = Modifier.fillMaxWidth().height(170.dp).verticalScroll(rememberScrollState()).padding(vertical = 8.dp),
+            )
         }
-        // Switchable bottom panel, below the main view.
-        PanelSwitch(state, actions)
-        BottomPanel(
-            state, actions,
-            modifier = Modifier.fillMaxWidth().height(170.dp).verticalScroll(rememberScrollState()).padding(vertical = 8.dp),
-        )
     }
 }
