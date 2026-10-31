@@ -170,6 +170,37 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    /**
+     * Non-lazy pad grid for portrait: a lazy grid inside a scrollable
+     * Column is measured with infinite height and crashes on launch
+     * ("vertically scrollable component was measured with an infinite
+     * maximum height"). Rows of buttons have no such restriction, so
+     * portrait uses this and keeps its scroll; landscape keeps the
+     * lazy grid, where the height is finite.
+     */
+    @Composable
+    private fun PadGridRows(columns: Int, modifier: Modifier = Modifier) {
+        val rows = (24 + columns - 1) / columns
+        Column(
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+            modifier = modifier,
+        ) {
+            for (row in 0 until rows) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    for (col in 0 until columns) {
+                        val pad = row * columns + col
+                        if (pad < 24) {
+                            PadButton(pad, Modifier.weight(1f))
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     @Composable
     private fun PadGrid(columns: Int, modifier: Modifier = Modifier) {
         LazyVerticalGrid(
@@ -308,7 +339,7 @@ class MainActivity : ComponentActivity() {
                 TransportButtons()
             }
             MixControls()
-            PadGrid(
+            PadGridRows(
                 columns = 6,
                 modifier = Modifier
                     .fillMaxWidth()
