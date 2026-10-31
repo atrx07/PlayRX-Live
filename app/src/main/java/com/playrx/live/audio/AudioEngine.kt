@@ -105,7 +105,7 @@ object SampleBank {
                 val out = FloatArray(noise.size)
                 for (i in out.indices) {
                     val t = i.toDouble() / SAMPLE_RATE
-                    out[i] = (noise[i] * exp(-t * 14) * 0.7f + body[i] * 0.6f)
+                    out[i] = (noise[i] * exp(-t * 14).toFloat() * 0.7f + body[i] * 0.6f)
                 }
                 out
             }
