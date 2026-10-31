@@ -1,14 +1,18 @@
 package com.playrx.live.ui
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.rememberScrollState
@@ -34,9 +38,11 @@ import com.playrx.live.audio.SampleBank
  * with no Activity, engine, or MIDI device, and lets the app and the
  * screenshot tests share one implementation (no drift between them).
  *
- * Layout (unchanged from the landscape-first UI pass):
+ * Layout (UI fix round, after Paparazzi run #25):
  * - Landscape (primary, music-rest use): top bar, 8-column pad grid
- *   left, 240dp side panel right, sequencer across the bottom.
+ *   left (rounded-rectangle pads, height fitted so all 6 rows show),
+ *   240dp side panel right. Sequencer is DRUM-tab only, not at the
+ *   bottom of LOOP — that row was what cut the grid in half.
  * - Portrait (handheld secondary): stacked, scrollable column, grid
  *   wrapped to 4 columns via non-lazy rows (a lazy grid inside a
  *   scrollable Column crashes: infinite-height measurement).
@@ -73,8 +79,15 @@ private fun columnColor(col: Int): Color = when (col) {
 private fun PadButton(state: PlayRxState, actions: PlayRxActions, pad: Int, modifier: Modifier = Modifier) {
     val isActiveLoop = state.activeLoops.contains(pad)
     val isSelected = state.selectedPad == pad
+    // Rounded rectangle, NOT a circle: Material3 Button's default shape
+    // with aspectRatio(1f) rendered as a circle, which made the grid
+    // look like bubbles and wasted every cell's corners (Paparazzi
+    // run #25). Shape is set here; size comes from the caller, so
+    // portrait can stay square and landscape can fit 6 rows.
     Button(
         onClick = { actions.onPadClick(pad) },
+        shape = RoundedCornerShape(12.dp),
+        contentPadding = PaddingValues(2.dp),
         colors = ButtonDefaults.buttonColors(
             containerColor = when {
                 isSelected -> Color(0xFFFFC107)
@@ -82,7 +95,7 @@ private fun PadButton(state: PlayRxState, actions: PlayRxActions, pad: Int, modi
                 else -> columnColor(SampleBank.columnOf(pad))
             }
         ),
-        modifier = modifier.aspectRatio(1f),
+        modifier = modifier,
     ) {
         Text(SampleBank.PAD_NAMES[pad], fontSize = 9.sp, maxLines = 2)
     }
@@ -97,7 +110,7 @@ private fun PadGridRows(state: PlayRxState, actions: PlayRxActions, columns: Int
                 for (col in 0 until columns) {
                     val pad = row * columns + col
                     if (pad < SampleBank.PAD_COUNT) {
-                        PadButton(state, actions, pad, Modifier.weight(1f))
+                        PadButton(state, actions, pad, Modifier.weight(1f).aspectRatio(1f))
                     }
                 }
             }
@@ -106,7 +119,13 @@ private fun PadGridRows(state: PlayRxState, actions: PlayRxActions, columns: Int
 }
 
 @Composable
-private fun PadGrid(state: PlayRxState, actions: PlayRxActions, columns: Int, modifier: Modifier = Modifier) {
+private fun PadGrid(
+    state: PlayRxState,
+    actions: PlayRxActions,
+    columns: Int,
+    padHeight: androidx.compose.ui.unit.Dp,
+    modifier: Modifier = Modifier,
+) {
     LazyVerticalGrid(
         columns = GridCells.Fixed(columns),
         horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -114,7 +133,7 @@ private fun PadGrid(state: PlayRxState, actions: PlayRxActions, columns: Int, mo
         modifier = modifier,
     ) {
         items(SampleBank.PAD_COUNT) { pad ->
-            PadButton(state, actions, pad)
+            PadButton(state, actions, pad, Modifier.height(padHeight))
         }
     }
 }
@@ -142,10 +161,10 @@ private fun ColumnMixer(state: PlayRxState, actions: PlayRxActions) {
                 valueRange = 0f..1f,
                 modifier = Modifier.weight(1f),
             )
-            Button(onClick = { actions.onColumnMuteToggle(col) }) {
+            Button(onClick = { actions.onColumnMuteToggle(col) }, contentPadding = PaddingValues(4.dp)) {
                 Text(if (state.columnMuted[col]) "M" else "m")
             }
-            Button(onClick = { actions.onColumnSoloToggle(col) }) {
+            Button(onClick = { actions.onColumnSoloToggle(col) }, contentPadding = PaddingValues(4.dp)) {
                 Text(if (state.columnSolo[col]) "S" else "s")
             }
         }
@@ -218,8 +237,14 @@ private fun SequencerRow(state: PlayRxState, actions: PlayRxActions) {
         for (step in 0 until 16) {
             val on = state.steps[state.selectedPad][step]
             val isCurrent = state.currentStep == step && state.isPlaying
+            // Zero content padding: Material3 Button's default 16dp
+            // horizontal padding left no room for two-digit numbers in
+            // a 1/16-width button, so 10-16 all rendered as "1" on phone
+            // landscape (Paparazzi run #25). With 0 padding, "16" fits.
             Button(
                 onClick = { actions.onStepToggle(state.selectedPad, step) },
+                shape = RoundedCornerShape(8.dp),
+                contentPadding = PaddingValues(0.dp),
                 colors = ButtonDefaults.buttonColors(
                     containerColor = when {
                         isCurrent && on -> Color(0xFFFFC107)
@@ -230,7 +255,7 @@ private fun SequencerRow(state: PlayRxState, actions: PlayRxActions) {
                 ),
                 modifier = Modifier.weight(1f),
             ) {
-                Text((step + 1).toString(), fontSize = 9.sp, maxLines = 1)
+                Text((step + 1).toString(), fontSize = 9.sp, maxLines = 1, softWrap = false)
             }
         }
     }
@@ -297,25 +322,36 @@ private fun LandscapeContent(state: PlayRxState, actions: PlayRxActions) {
         }
         TopTabs(state, actions)
         if (state.selectedTab == "LOOP") {
-            Row(modifier = Modifier.weight(1f).fillMaxWidth().padding(vertical = 8.dp)) {
-                PadGrid(
-                    state, actions, columns = 8,
-                    modifier = Modifier.weight(1f).fillMaxHeight().padding(end = 12.dp),
-                )
-                Column(
-                    modifier = Modifier.width(240.dp).fillMaxHeight().verticalScroll(rememberScrollState()),
-                ) {
-                    MixControls(state, actions)
-                    Text(
-                        "8 columns x 6 variations = 48 pads. Pad + FX columns loop.",
-                        style = MaterialTheme.typography.bodySmall,
-                        modifier = Modifier.padding(top = 8.dp),
+            // Sequencer lives on the DRUM tab only (it used to sit at
+            // the bottom of LOOP too, eating the height the grid needed
+            // and leaving row 3 sliced in half on phone landscape).
+            // Pad height is derived from the available height so all
+            // 6 rows fit exactly, with no scrolling and no cut-off row:
+            // phone landscape pads become wide rectangles, tablet
+            // landscape pads stay near-square — both intentional.
+            BoxWithConstraints(modifier = Modifier.weight(1f).fillMaxWidth().padding(vertical = 8.dp)) {
+                val rows = 6
+                val spacing = 6.dp
+                val padHeight = (maxHeight - spacing * (rows - 1)) / rows
+                Row(modifier = Modifier.fillMaxSize()) {
+                    PadGrid(
+                        state, actions, columns = 8, padHeight = padHeight,
+                        modifier = Modifier.weight(1f).fillMaxHeight().padding(end = 12.dp),
                     )
-                    PadEditPanel(state, actions)
-                    ColumnMixer(state, actions)
+                    Column(
+                        modifier = Modifier.width(240.dp).fillMaxHeight().verticalScroll(rememberScrollState()),
+                    ) {
+                        MixControls(state, actions)
+                        Text(
+                            "8 columns x 6 variations = 48 pads. Pad + FX columns loop.",
+                            style = MaterialTheme.typography.bodySmall,
+                            modifier = Modifier.padding(top = 8.dp),
+                        )
+                        PadEditPanel(state, actions)
+                        ColumnMixer(state, actions)
+                    }
                 }
             }
-            SequencerRow(state, actions)
         } else if (state.selectedTab == "DRUM") {
             SequencerRow(state, actions)
         } else {
