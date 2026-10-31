@@ -18,7 +18,25 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    // Signing fix (2026-10-31): do NOT rely on AGP's default debug key.
+    // Runs #13/#14/#15 proved the restored ~/.android/debug.keystore was
+    // being ignored and each runner generated its own throwaway key, so
+    // in-place updates conflicted. Pointing the debug config at the
+    // restored file explicitly makes a missing file fail loudly instead
+    // of silently signing with a new key. This is DEBUG-only; a release
+    // keystore is a separate, private setup.
+    signingConfigs {
+        create("debug") {
+            storeFile = file("${System.getProperty("user.home")}/.android/debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
+    }
     buildTypes {
+        debug {
+            signingConfig = signingConfigs.getByName("debug")
+        }
         release {
             isMinifyEnabled = false
         }
