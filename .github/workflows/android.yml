@@ -1,5 +1,21 @@
 name: Android Build
 
+# Builds a debug APK on every push to main and every pull request,
+# and uploads it as a downloadable artifact.
+#
+# Signing: debug builds use a shared debug keystore so that a new APK
+# installs over the previous one instead of Android refusing it with
+# "package conflicts with an existing package". The keystore is stored
+# as a repository secret named DEBUG_KEYSTORE_B64 (base64 of the
+# keystore) and restored to ~/.android/debug.keystore before building.
+# If the secret is missing, the build still succeeds with the runner's
+# throwaway debug key — it just won't update in place.
+#
+# NOTE: this repo deliberately has no Gradle wrapper (gradlew). The
+# wrapper JAR is a binary file that cannot go through the project's
+# GitHub push tooling, so the workflow installs Gradle directly
+# (8.7, which matches Android Gradle Plugin 8.5.2) instead.
+
 on:
   push:
     branches: [main]
@@ -24,6 +40,14 @@ jobs:
         uses: gradle/actions/setup-gradle@v3
         with:
           gradle-version: 8.7
+
+      - name: Restore consistent debug keystore
+        if: ${{ secrets.DEBUG_KEYSTORE_B64 != '' }}
+        run: |
+          mkdir -p ~/.android
+          echo "$DEBUG_KEYSTORE_B64" | base64 --decode > ~/.android/debug.keystore
+        env:
+          DEBUG_KEYSTORE_B64: ${{ secrets.DEBUG_KEYSTORE_B64 }}
 
       - name: Build debug APK
         run: gradle assembleDebug --stacktrace
