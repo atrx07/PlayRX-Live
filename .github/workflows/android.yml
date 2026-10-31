@@ -64,3 +64,37 @@ jobs:
           name: PlayRX-Live-debug
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
+
+  # Visual QA screenshots (Paparazzi, JVM-only, no emulator needed).
+  # Manual-only for now: Paparazzi tests are not yet in the repo, so this
+  # job is a placeholder that records what it can and uploads whatever
+  # screenshots exist. It never runs on push/PR, so it cannot break the
+  # normal build. Once screenshot tests land, replace the record step
+  # with a hard `gradle recordPaparazziDebug` and flip this to run on PRs.
+  screenshots:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Set up Gradle 8.7
+        uses: gradle/actions/setup-gradle@v3
+        with:
+          gradle-version: 8.7
+
+      - name: Record Paparazzi screenshots (placeholder until tests land)
+        run: gradle recordPaparazziDebug --stacktrace || echo "Paparazzi not yet configured"
+
+      - name: Upload screenshots
+        uses: actions/upload-artifact@v4
+        with:
+          name: PlayRX-screenshots
+          path: app/build/paparazzi/
+          if-no-files-found: warn
