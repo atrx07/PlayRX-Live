@@ -207,17 +207,32 @@ private fun TempoControls(state: PlayRxState, actions: PlayRxActions) {
 }
 
 @Composable
+private fun PanelSwitchButton(state: PlayRxState, actions: PlayRxActions, panel: String, modifier: Modifier = Modifier) {
+    Button(
+        onClick = { actions.onPanelSelect(panel) },
+        contentPadding = PaddingValues(4.dp),
+        colors = ButtonDefaults.buttonColors(
+            containerColor = if (state.selectedPanel == panel) Color(0xFFFFC107) else Color(0xFF7E57C2)
+        ),
+        modifier = modifier,
+    ) {
+        Text(panel, fontSize = 11.sp, maxLines = 1, softWrap = false)
+    }
+}
+
+@Composable
 private fun PanelSwitch(state: PlayRxState, actions: PlayRxActions) {
-    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        for (panel in listOf("EDIT", "MIXER", "FX", "SAMPLES")) {
-            Button(
-                onClick = { actions.onPanelSelect(panel) },
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = if (state.selectedPanel == panel) Color(0xFFFFC107) else Color(0xFF7E57C2)
-                ),
-            ) {
-                Text(panel)
-            }
+    // 2x2, not a single Row: four full-size buttons do not fit a
+    // 260dp landscape panel column, and the 4th (SAMPLES) was cut
+    // off the right edge in the panel2 screenshots (2026-10-31).
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+            PanelSwitchButton(state, actions, "EDIT", Modifier.weight(1f))
+            PanelSwitchButton(state, actions, "MIXER", Modifier.weight(1f))
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+            PanelSwitchButton(state, actions, "FX", Modifier.weight(1f))
+            PanelSwitchButton(state, actions, "SAMPLES", Modifier.weight(1f))
         }
     }
 }
