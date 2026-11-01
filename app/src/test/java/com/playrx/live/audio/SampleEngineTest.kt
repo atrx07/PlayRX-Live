@@ -58,16 +58,18 @@ class SampleEngineTest {
 
     @Test
     fun cutToGrid_snapsStartDownEndUp() {
-        // 120 BPM, 44100 Hz, 16th = 0.25 beat = 11025 frames.
+        // 120 BPM, 44100 Hz: a beat is 22050 frames, a 16th is
+        // 5512.5 -> 5513 frames. Start snaps down, end snaps up.
         val (s, e) = SampleEngine.cutToGrid(12000, 23000, 44100, 120f, 0.25f)
-        assertEquals(11025, s)
-        assertEquals(33075, e)
+        assertEquals(11026, s)
+        assertEquals(27565, e)
     }
 
     @Test
-    fun gridFrames_quarterAt120IsOneSecond() {
-        assertEquals(44100, SampleEngine.gridFrames(44100, 120f, 1.0f))
-        assertEquals(11025, SampleEngine.gridFrames(44100, 120f, 0.25f))
+    fun gridFrames_quarterAt120IsHalfSecond() {
+        // 120 BPM: a beat lasts 60/120 = 0.5 s = 22050 frames.
+        assertEquals(22050, SampleEngine.gridFrames(44100, 120f, 1.0f))
+        assertEquals(5513, SampleEngine.gridFrames(44100, 120f, 0.25f))
     }
 
     @Test
