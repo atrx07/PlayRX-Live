@@ -184,11 +184,13 @@ class MainActivity : ComponentActivity() {
         },
         onImportSample = { importPicker.launch("audio/*") },
         onAssignSample = { name ->
-            val info = sampleList.firstOrNull { it.name == name } ?: return@onAssignSample
-            val decoded = SampleStore.decodeStored(this, info) ?: run {
+            val info = sampleList.firstOrNull { it.name == name }
+            val decoded = if (info == null) null else SampleStore.decodeStored(this, info)
+            if (info == null) {
+                sampleImportError = "Sample not found: $name"
+            } else if (decoded == null) {
                 sampleImportError = "Could not decode ${info.name} again."
-                return@onAssignSample
-            }
+            } else {
             val mode = if (SampleBank.isLoopPad(selectedPad)) PlayMode.LOOP else PlayMode.ONE_SHOT
             // Key dynamics read the category from SampleInfo. The
             // category follows the *target* pad's column, not the
@@ -205,32 +207,43 @@ class MainActivity : ComponentActivity() {
                 targetInfo,
             )
             sampleVersion++
+            }
         },
         onSamplePlayMode = { mode ->
-            val cur = engine.importedAssignment(selectedPad) ?: return@onSamplePlayMode
-            val parsed = runCatching { PlayMode.valueOf(mode) }.getOrNull() ?: return@onSamplePlayMode
-            engine.updateImportedAssignment(selectedPad, cur.copy(playMode = parsed))
-            sampleVersion++
+            val cur = engine.importedAssignment(selectedPad)
+            val parsed = if (cur == null) null else runCatching { PlayMode.valueOf(mode) }.getOrNull()
+            if (cur != null && parsed != null) {
+                engine.updateImportedAssignment(selectedPad, cur.copy(playMode = parsed))
+                sampleVersion++
+            }
         },
         onSampleTranspose = { semitones ->
-            val cur = engine.importedAssignment(selectedPad) ?: return@onSampleTranspose
-            engine.updateImportedAssignment(selectedPad, cur.copy(transposeSemitones = semitones))
-            sampleVersion++
+            val cur = engine.importedAssignment(selectedPad)
+            if (cur != null) {
+                engine.updateImportedAssignment(selectedPad, cur.copy(transposeSemitones = semitones))
+                sampleVersion++
+            }
         },
         onSampleSnapToggle = {
-            val cur = engine.importedAssignment(selectedPad) ?: return@onSampleSnapToggle
-            engine.updateImportedAssignment(selectedPad, cur.copy(snapToTempo = !cur.snapToTempo))
-            sampleVersion++
+            val cur = engine.importedAssignment(selectedPad)
+            if (cur != null) {
+                engine.updateImportedAssignment(selectedPad, cur.copy(snapToTempo = !cur.snapToTempo))
+                sampleVersion++
+            }
         },
         onSampleCutToggle = {
-            val cur = engine.importedAssignment(selectedPad) ?: return@onSampleCutToggle
-            engine.updateImportedAssignment(selectedPad, cur.copy(cutToGrid = !cur.cutToGrid))
-            sampleVersion++
+            val cur = engine.importedAssignment(selectedPad)
+            if (cur != null) {
+                engine.updateImportedAssignment(selectedPad, cur.copy(cutToGrid = !cur.cutToGrid))
+                sampleVersion++
+            }
         },
         onSampleReverseToggle = {
-            val cur = engine.importedAssignment(selectedPad) ?: return@onSampleReverseToggle
-            engine.updateImportedAssignment(selectedPad, cur.copy(reverse = !cur.reverse))
-            sampleVersion++
+            val cur = engine.importedAssignment(selectedPad)
+            if (cur != null) {
+                engine.updateImportedAssignment(selectedPad, cur.copy(reverse = !cur.reverse))
+                sampleVersion++
+            }
         },
         onPadVolume = { pad, volume ->
             engine.setPadVolume(pad, volume)
