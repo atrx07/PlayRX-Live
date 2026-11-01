@@ -102,3 +102,42 @@ the grid and hid Edit/Mixer below the fold. Never restore it.
 - Screenshot states in `PlayRxScreenshotTest`: loopDefault and
   loopPlaying use the default MIXER panel; loopEditMixer uses
   the EDIT panel — so both panels are visually proven every run.
+
+## Dark theme (2026-11-01, full UI round)
+
+Dark overall, from the Tutorial Tour look and the user's spec.
+Do not revert to a light screen — the light screenshots were
+the "not satisfied" version.
+
+- Background: near-black `#121218`. Panels: `#1C1C26` dark cards
+  with 16dp rounded corners. Primary text `#F2F2F7`, dim/secondary
+  text `#9A9AAA`. Unselected tabs/pills: `#262633`.
+- Pads — the exact read, do not simplify it back to "selected =
+  amber, active = teal":
+  - Unselected, not playing: PALE column colour (solid colour at
+    ~22% alpha over the dark background) + DIM outline (same
+    colour at ~45% alpha, 1dp). Text in the column colour.
+  - Playing: FILLED solid column colour. Text white, except
+    Tops yellow where text is black.
+  - Playing + selected: FILLED solid colour + DARK outline
+    (black, 3dp). This is the mark for a selected playing pad
+    when a side panel (EDIT / MIXER / FX / SAMPLES) is open.
+  - Selected, not playing: pale fill + STRONG column-colour
+    outline (2dp) — visible as selected, not faked as playing.
+- Top tabs: pill buttons, selected = white fill + black text,
+  unselected = dark pill + dim text.
+- Panel switch: selected = amber fill + black text, unselected
+  = dark pill + dim text, in a 2x2 grid (see panel-position note
+  below).
+- Transport: dark pills; Play while playing = teal fill + black
+  text. Mixer sliders use their column colour for thumb/track,
+  with a pale inactive track. M = white when muted, S = amber
+  when soloed, otherwise dark pill + dim text.
+- Sequencer steps follow the same pad read: off = dark pill +
+  dim outline, on = filled teal + black text, current + on =
+  filled teal + dark (black) outline, current + off = dark pill
+  + white outline.
+- Screenshot tests still use the Light Paparazzi theme name, but
+  the screen itself forces the dark palette (explicit Surface,
+  text, and button colours), so recorded PNGs are dark.
+

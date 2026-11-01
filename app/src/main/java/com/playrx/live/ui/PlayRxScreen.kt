@@ -1,5 +1,7 @@
 package com.playrx.live.ui
 
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
@@ -21,12 +23,15 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
+import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.playrx.live.audio.SampleBank
@@ -39,11 +44,22 @@ import com.playrx.live.audio.SampleBank
  * screenshot tests share one implementation (no drift between them).
  *
  * Layout (Tutorial Tour restructure, 2026-10-31 — see
- * docs/UI-STRUCTURE.md):
+ * docs/UI-STRUCTURE.md) + full dark UI (2026-11-01, from the
+ * Tutorial Tour look and the user's dark spec):
+ * - Dark overall: near-black background, dark panels, light text.
+ * - Pads, the Remixlive read: UNSELECTED = pale column colour
+ *   (solid colour at ~22% alpha over the dark background) with a
+ *   DIM outline (same colour at ~45% alpha, 1dp). PLAYING =
+ *   FILLED solid column colour. PLAYING + SELECTED = filled
+ *   solid colour + DARK outline (black, 3dp) — that dark outline
+ *   is what marks the selected playing pad when a side panel
+ *   (EDIT / MIXER / FX / SAMPLES) is open. Selected but not
+ *   playing = pale fill + STRONG column-colour outline (2dp),
+ *   so selection is visible without pretending it is playing.
  * - Top tabs only: LOOP, SEQ, DRUM, SONG. Edit and Mixer are NOT
  *   top tabs and NOT a side column inside LOOP.
- * - Below the main view, a switchable bottom panel, chosen by the
- *   EDIT / MIXER / FX / SAMPLES buttons: EDIT = selected pad,
+ * - Below / beside the main view, a switchable panel, chosen by
+ *   the EDIT / MIXER / FX / SAMPLES buttons: EDIT = selected pad,
  *   MIXER = VOLUMES (per-column faders + M/S, plus tempo/master),
  *   FX = delay for now (beat-repeat / XY pad next), SAMPLES =
  *   collection / import placeholder (own manifest, next).
@@ -59,14 +75,33 @@ import com.playrx.live.audio.SampleBank
  *   wrapped to 4 columns via non-lazy rows (a lazy grid inside a
  *   scrollable Column crashes: infinite-height measurement).
  */
+// Dark palette, shared by every composable below.
+private val DarkBg = Color(0xFF121218)
+private val DarkPanel = Color(0xFF1C1C26)
+private val DarkTab = Color(0xFF262633)
+private val TextMain = Color(0xFFF2F2F7)
+private val TextDim = Color(0xFF9A9AAA)
+private val AccentAmber = Color(0xFFFFC107)
+private val PlayingTeal = Color(0xFF00BFA5)
+
 @Composable
 fun PlayRxScreen(
     state: PlayRxState,
     actions: PlayRxActions = PlayRxActions(),
     isLandscape: Boolean,
 ) {
-    MaterialTheme {
-        Surface(modifier = Modifier.fillMaxSize()) {
+    MaterialTheme(
+        colorScheme = darkColorScheme(
+            background = DarkBg,
+            surface = DarkBg,
+            surfaceVariant = DarkPanel,
+            primary = AccentAmber,
+            onBackground = TextMain,
+            onSurface = TextMain,
+            onSurfaceVariant = TextDim,
+        )
+    ) {
+        Surface(color = DarkBg, modifier = Modifier.fillMaxSize()) {
             if (isLandscape) {
                 LandscapeContent(state, actions)
             } else {
@@ -91,25 +126,42 @@ private fun columnColor(col: Int): Color = when (col) {
 private fun PadButton(state: PlayRxState, actions: PlayRxActions, pad: Int, modifier: Modifier = Modifier) {
     val isActiveLoop = state.activeLoops.contains(pad)
     val isSelected = state.selectedPad == pad
-    // Rounded rectangle, NOT a circle: Material3 Button's default shape
-    // with aspectRatio(1f) rendered as a circle, which made the grid
-    // look like bubbles and wasted every cell's corners (Paparazzi
-    // run #25). Shape is set here; size comes from the caller, so
-    // portrait can stay square and landscape can fit 6 rows.
+    val col = columnColor(SampleBank.columnOf(pad))
+    // Remixlive pad read, dark version:
+    // - unselected, not playing: pale fill + dim outline
+    // - playing: filled solid colour
+    // - playing + selected: filled solid + dark (black) outline
+    // - selected, not playing: pale fill + strong colour outline
+    // The old code made every selected pad amber and every active
+    // loop teal, which hid the pad's own column colour entirely.
+    val container = when {
+        isActiveLoop -> col
+        isSelected -> col.copy(alpha = 0.35f)
+        else -> col.copy(alpha = 0.22f)
+    }
+    val border = when {
+        isActiveLoop && isSelected -> BorderStroke(3.dp, Color.Black)
+        isActiveLoop -> BorderStroke(1.dp, Color.Black.copy(alpha = 0.35f))
+        isSelected -> BorderStroke(2.dp, col)
+        else -> BorderStroke(1.dp, col.copy(alpha = 0.45f))
+    }
+    val content = when {
+        isActiveLoop -> if (col == columnColor(2)) Color.Black else Color.White
+        isSelected -> Color.White
+        else -> col
+    }
     Button(
         onClick = { actions.onPadClick(pad) },
         shape = RoundedCornerShape(12.dp),
         contentPadding = PaddingValues(2.dp),
+        border = border,
         colors = ButtonDefaults.buttonColors(
-            containerColor = when {
-                isSelected -> Color(0xFFFFC107)
-                isActiveLoop -> Color(0xFF00BFA5)
-                else -> columnColor(SampleBank.columnOf(pad))
-            }
+            containerColor = container,
+            contentColor = content,
         ),
         modifier = modifier,
     ) {
-        Text(SampleBank.PAD_NAMES[pad], fontSize = 9.sp, maxLines = 2)
+        Text(SampleBank.PAD_NAMES[pad], fontSize = 9.sp, fontWeight = FontWeight.SemiBold, maxLines = 2)
     }
 }
 
@@ -154,8 +206,16 @@ private fun PadGrid(
 private fun TopTabs(state: PlayRxState, actions: PlayRxActions) {
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         for (tab in listOf("LOOP", "SEQ", "DRUM", "SONG")) {
-            Button(onClick = { actions.onTabSelect(tab) }) {
-                Text(tab)
+            val selected = state.selectedTab == tab
+            Button(
+                onClick = { actions.onTabSelect(tab) },
+                shape = RoundedCornerShape(20.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = if (selected) Color.White else DarkTab,
+                    contentColor = if (selected) Color.Black else TextDim,
+                ),
+            ) {
+                Text(tab, fontSize = 12.sp, fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal)
             }
         }
     }
@@ -163,21 +223,43 @@ private fun TopTabs(state: PlayRxState, actions: PlayRxActions) {
 
 @Composable
 private fun ColumnMixer(state: PlayRxState, actions: PlayRxActions) {
-    Text("Mixer — one strip per instrument column", style = MaterialTheme.typography.bodySmall)
+    Text("Mixer — one strip per instrument column", style = MaterialTheme.typography.bodySmall, color = TextDim)
     for (col in 0 until SampleBank.COLUMNS) {
+        val colColor = columnColor(col)
         Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text(SampleBank.COLUMN_NAMES[col], modifier = Modifier.width(52.dp))
+            Text(SampleBank.COLUMN_NAMES[col], modifier = Modifier.width(52.dp), color = TextMain)
             Slider(
                 value = state.columnVolumes[col],
                 onValueChange = { actions.onColumnVolume(col, it) },
                 valueRange = 0f..1f,
+                colors = SliderDefaults.colors(
+                    thumbColor = colColor,
+                    activeTrackColor = colColor,
+                    inactiveTrackColor = colColor.copy(alpha = 0.25f),
+                ),
                 modifier = Modifier.weight(1f),
             )
-            Button(onClick = { actions.onColumnMuteToggle(col) }, contentPadding = PaddingValues(4.dp)) {
-                Text(if (state.columnMuted[col]) "M" else "m")
+            val muted = state.columnMuted[col]
+            Button(
+                onClick = { actions.onColumnMuteToggle(col) },
+                contentPadding = PaddingValues(4.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = if (muted) Color.White else DarkTab,
+                    contentColor = if (muted) Color.Black else TextDim,
+                ),
+            ) {
+                Text(if (muted) "M" else "m")
             }
-            Button(onClick = { actions.onColumnSoloToggle(col) }, contentPadding = PaddingValues(4.dp)) {
-                Text(if (state.columnSolo[col]) "S" else "s")
+            val solo = state.columnSolo[col]
+            Button(
+                onClick = { actions.onColumnSoloToggle(col) },
+                contentPadding = PaddingValues(4.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = if (solo) AccentAmber else DarkTab,
+                    contentColor = if (solo) Color.Black else TextDim,
+                ),
+            ) {
+                Text(if (solo) "S" else "s")
             }
         }
     }
@@ -186,13 +268,28 @@ private fun ColumnMixer(state: PlayRxState, actions: PlayRxActions) {
 @Composable
 private fun TransportButtons(state: PlayRxState, actions: PlayRxActions) {
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        Button(onClick = actions.onPlayToggle) {
+        Button(
+            onClick = actions.onPlayToggle,
+            shape = RoundedCornerShape(20.dp),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = if (state.isPlaying) PlayingTeal else DarkTab,
+                contentColor = if (state.isPlaying) Color.Black else TextMain,
+            ),
+        ) {
             Text(if (state.isPlaying) "Pause" else "Play")
         }
-        Button(onClick = actions.onStop) {
+        Button(
+            onClick = actions.onStop,
+            shape = RoundedCornerShape(20.dp),
+            colors = ButtonDefaults.buttonColors(containerColor = DarkTab, contentColor = TextMain),
+        ) {
             Text("Stop")
         }
-        Button(onClick = actions.onConnectMidi) {
+        Button(
+            onClick = actions.onConnectMidi,
+            shape = RoundedCornerShape(20.dp),
+            colors = ButtonDefaults.buttonColors(containerColor = DarkTab, contentColor = TextMain),
+        ) {
             Text("Connect MIDI")
         }
     }
@@ -200,10 +297,16 @@ private fun TransportButtons(state: PlayRxState, actions: PlayRxActions) {
 
 @Composable
 private fun TempoControls(state: PlayRxState, actions: PlayRxActions) {
-    Text("BPM: ${state.bpm.toInt()}")
-    Slider(value = state.bpm, onValueChange = actions.onBpmChange, valueRange = 60f..180f)
-    Text("Master volume: ${(state.masterVolume * 100).toInt()}%")
-    Slider(value = state.masterVolume, onValueChange = actions.onVolumeChange, valueRange = 0f..1f)
+    Text("BPM: ${state.bpm.toInt()}", color = TextMain)
+    Slider(
+        value = state.bpm, onValueChange = actions.onBpmChange, valueRange = 60f..180f,
+        colors = SliderDefaults.colors(thumbColor = Color.White, activeTrackColor = AccentAmber, inactiveTrackColor = DarkTab),
+    )
+    Text("Master volume: ${(state.masterVolume * 100).toInt()}%", color = TextMain)
+    Slider(
+        value = state.masterVolume, onValueChange = actions.onVolumeChange, valueRange = 0f..1f,
+        colors = SliderDefaults.colors(thumbColor = Color.White, activeTrackColor = AccentAmber, inactiveTrackColor = DarkTab),
+    )
 }
 
 @Composable
@@ -211,8 +314,10 @@ private fun PanelSwitchButton(state: PlayRxState, actions: PlayRxActions, panel:
     Button(
         onClick = { actions.onPanelSelect(panel) },
         contentPadding = PaddingValues(4.dp),
+        shape = RoundedCornerShape(12.dp),
         colors = ButtonDefaults.buttonColors(
-            containerColor = if (state.selectedPanel == panel) Color(0xFFFFC107) else Color(0xFF7E57C2)
+            containerColor = if (state.selectedPanel == panel) AccentAmber else DarkTab,
+            contentColor = if (state.selectedPanel == panel) Color.Black else TextDim,
         ),
         modifier = modifier,
     ) {
@@ -239,18 +344,27 @@ private fun PanelSwitch(state: PlayRxState, actions: PlayRxActions) {
 
 @Composable
 private fun BottomPanel(state: PlayRxState, actions: PlayRxActions, modifier: Modifier = Modifier) {
-    Column(modifier = modifier) {
+    // The side panel itself is a dark card, so the panel area reads
+    // as one Remixlive-style lower panel, not as loose controls on
+    // the background.
+    Column(modifier = modifier.background(DarkPanel, RoundedCornerShape(16.dp)).padding(12.dp)) {
         when (state.selectedPanel) {
             "EDIT" -> {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Button(onClick = actions.onEditToggle) {
+                    Button(
+                        onClick = actions.onEditToggle,
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (state.editPattern) AccentAmber else DarkTab,
+                            contentColor = if (state.editPattern) Color.Black else TextMain,
+                        ),
+                    ) {
                         Text(if (state.editPattern) "Edit: On — tap a pad to select" else "Edit pattern")
                     }
                 }
                 PadEditPanel(state, actions)
             }
             "FX" -> {
-                Text("FX — Delay for now; beat-repeat and XY pad come next.", style = MaterialTheme.typography.bodySmall)
+                Text("FX — Delay for now; beat-repeat and XY pad come next.", style = MaterialTheme.typography.bodySmall, color = TextDim)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("Delay FX")
                     Switch(checked = state.delayOn, onCheckedChange = actions.onDelayChange)
@@ -260,11 +374,11 @@ private fun BottomPanel(state: PlayRxState, actions: PlayRxActions, modifier: Mo
                 Text(
                     "Samples / Collection — next: import your own WAV/OGG " +
                         "in PlayRX's own manifest format. No copied packs.",
-                    style = MaterialTheme.typography.bodySmall,
+                    style = MaterialTheme.typography.bodySmall, color = TextDim,
                 )
             }
             else -> {
-                Text("Mixer — VOLUMES", style = MaterialTheme.typography.bodySmall)
+                Text("Mixer — VOLUMES", style = MaterialTheme.typography.bodySmall, color = TextDim)
                 TempoControls(state, actions)
                 ColumnMixer(state, actions)
             }
@@ -276,23 +390,39 @@ private fun BottomPanel(state: PlayRxState, actions: PlayRxActions, modifier: Mo
 private fun PadEditPanel(state: PlayRxState, actions: PlayRxActions) {
     val pad = state.selectedPad
     val type = if (SampleBank.isLoopPad(pad)) "Loop" else "One-shot"
+    val col = columnColor(SampleBank.columnOf(pad))
     Column {
         Text(
             "Pad: ${SampleBank.PAD_NAMES[pad]} ($type) — tap Edit pattern, then a pad, to select without playing",
-            style = MaterialTheme.typography.bodySmall,
+            style = MaterialTheme.typography.bodySmall, color = TextDim,
         )
-        Text("Pad volume: ${(state.padVolumes[pad] * 100).toInt()}%")
+        Text("Pad volume: ${(state.padVolumes[pad] * 100).toInt()}%", color = TextMain)
         Slider(
             value = state.padVolumes[pad],
             onValueChange = { actions.onPadVolume(pad, it) },
             valueRange = 0f..1f,
+            colors = SliderDefaults.colors(thumbColor = col, activeTrackColor = col, inactiveTrackColor = col.copy(alpha = 0.25f)),
         )
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(onClick = { actions.onPadMuteToggle(pad) }) {
-                Text(if (state.padMuted[pad]) "Muted" else "Mute")
+            val muted = state.padMuted[pad]
+            Button(
+                onClick = { actions.onPadMuteToggle(pad) },
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = if (muted) Color.White else DarkTab,
+                    contentColor = if (muted) Color.Black else TextMain,
+                ),
+            ) {
+                Text(if (muted) "Muted" else "Mute")
             }
-            Button(onClick = { actions.onPadSoloToggle(pad) }) {
-                Text(if (state.padSolo[pad]) "Soloed" else "Solo")
+            val solo = state.padSolo[pad]
+            Button(
+                onClick = { actions.onPadSoloToggle(pad) },
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = if (solo) AccentAmber else DarkTab,
+                    contentColor = if (solo) Color.Black else TextMain,
+                ),
+            ) {
+                Text(if (solo) "Soloed" else "Solo")
             }
         }
     }
@@ -302,27 +432,30 @@ private fun PadEditPanel(state: PlayRxState, actions: PlayRxActions) {
 private fun SequencerRow(state: PlayRxState, actions: PlayRxActions) {
     Text(
         "Sequencer — ${SampleBank.PAD_NAMES[state.selectedPad]} (tap Edit pattern, pick a drum pad, then toggle steps)",
-        style = MaterialTheme.typography.bodySmall,
+        style = MaterialTheme.typography.bodySmall, color = TextDim,
     )
     Row(horizontalArrangement = Arrangement.spacedBy(2.dp), modifier = Modifier.fillMaxWidth()) {
         for (step in 0 until 16) {
             val on = state.steps[state.selectedPad][step]
             val isCurrent = state.currentStep == step && state.isPlaying
-            // Zero content padding: Material3 Button's default 16dp
-            // horizontal padding left no room for two-digit numbers in
-            // a 1/16-width button, so 10-16 all rendered as "1" on phone
-            // landscape (Paparazzi run #25). With 0 padding, "16" fits.
+            // Same pad read as the grid: off = pale/dim, on = filled,
+            // current + on = filled + dark outline.
             Button(
                 onClick = { actions.onStepToggle(state.selectedPad, step) },
                 shape = RoundedCornerShape(8.dp),
                 contentPadding = PaddingValues(0.dp),
+                border = when {
+                    isCurrent && on -> BorderStroke(2.dp, Color.Black)
+                    isCurrent -> BorderStroke(2.dp, Color.White)
+                    on -> BorderStroke(1.dp, Color.Black.copy(alpha = 0.35f))
+                    else -> BorderStroke(1.dp, Color.White.copy(alpha = 0.15f))
+                },
                 colors = ButtonDefaults.buttonColors(
                     containerColor = when {
-                        isCurrent && on -> Color(0xFFFFC107)
-                        on -> Color(0xFF00BFA5)
-                        isCurrent -> Color(0xFF616161)
-                        else -> Color(0xFFE0E0E0)
-                    }
+                        on -> PlayingTeal
+                        else -> DarkTab
+                    },
+                    contentColor = if (on) Color.Black else TextDim,
                 ),
                 modifier = Modifier.weight(1f),
             ) {
@@ -339,7 +472,7 @@ private fun PlaceholderTab(state: PlayRxState) {
             "come after the pad and mixer are proven. PlayRX's edge over a " +
             "closed pad app is USB MIDI chord-following with a Yamaha keyboard, " +
             "open source, and no paywall.",
-        style = MaterialTheme.typography.bodySmall,
+        style = MaterialTheme.typography.bodySmall, color = TextDim,
         modifier = Modifier.padding(vertical = 12.dp),
     )
 }
@@ -352,9 +485,9 @@ private fun PortraitContent(state: PlayRxState, actions: PlayRxActions) {
             .verticalScroll(rememberScrollState())
             .padding(16.dp),
     ) {
-        Text("PlayRX Live", style = MaterialTheme.typography.headlineMedium)
-        Text(state.midiStatus, style = MaterialTheme.typography.bodySmall)
-        Text("Chord: ${state.chordText}", style = MaterialTheme.typography.titleMedium)
+        Text("PlayRX Live", style = MaterialTheme.typography.headlineMedium, color = TextMain)
+        Text(state.midiStatus, style = MaterialTheme.typography.bodySmall, color = TextDim)
+        Text("Chord: ${state.chordText}", style = MaterialTheme.typography.titleMedium, color = TextMain)
         Row(modifier = Modifier.padding(vertical = 8.dp)) {
             TransportButtons(state, actions)
         }
@@ -375,7 +508,7 @@ private fun PortraitContent(state: PlayRxState, actions: PlayRxActions) {
                 "in the app — no sample packs needed. Pad and FX columns are loop pads " +
                 "that repeat every bar. MIDI chord readout works when a keyboard " +
                 "is connected; chord-following of loops comes with MIDI testing later.",
-            style = MaterialTheme.typography.bodySmall,
+            style = MaterialTheme.typography.bodySmall, color = TextDim,
             modifier = Modifier.padding(top = 12.dp),
         )
     }
@@ -386,9 +519,9 @@ private fun LandscapeContent(state: PlayRxState, actions: PlayRxActions) {
     Column(modifier = Modifier.fillMaxSize().padding(12.dp)) {
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
             Column(modifier = Modifier.weight(1f)) {
-                Text("PlayRX Live", style = MaterialTheme.typography.titleLarge)
-                Text(state.midiStatus, style = MaterialTheme.typography.bodySmall)
-                Text("Chord: ${state.chordText}", style = MaterialTheme.typography.titleSmall)
+                Text("PlayRX Live", style = MaterialTheme.typography.titleLarge, color = TextMain)
+                Text(state.midiStatus, style = MaterialTheme.typography.bodySmall, color = TextDim)
+                Text("Chord: ${state.chordText}", style = MaterialTheme.typography.titleSmall, color = TextMain)
             }
             TransportButtons(state, actions)
         }
@@ -417,7 +550,7 @@ private fun LandscapeContent(state: PlayRxState, actions: PlayRxActions) {
             }
             Text(
                 "8 columns x 6 variations = 48 pads. Pad + FX columns loop.",
-                style = MaterialTheme.typography.bodySmall,
+                style = MaterialTheme.typography.bodySmall, color = TextDim,
             )
         } else if (state.selectedTab == "DRUM") {
             SequencerRow(state, actions)
