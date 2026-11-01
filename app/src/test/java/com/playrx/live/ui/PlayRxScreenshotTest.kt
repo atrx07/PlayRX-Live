@@ -45,6 +45,7 @@ private fun playingState(): PlayRxState = PlayRxState(
     // Loop pads are columns 5 (Pad) and 7 (FX): pad 5 and pad 15.
     activeLoops = setOf(5, 15),
     selectedPad = 5,
+    projectKeyMidi = 5,
 )
 
 private fun drumState(): PlayRxState {
@@ -59,6 +60,8 @@ private fun drumState(): PlayRxState {
         currentStep = 4,
         selectedPad = 0,
         selectedTab = "DRUM",
+        selectedPanel = "SAMPLES",
+        samples = listOf("my-kick.wav", "bass-loop.wav"),
         steps = steps,
     )
 }
@@ -75,6 +78,13 @@ private fun editMixerState(): PlayRxState {
         // Bottom panel on EDIT: proves Edit is its own switchable
         // panel below the grid, not a side column in LOOP.
         selectedPanel = "EDIT",
+        samples = listOf("my-kick.wav", "bass-loop.wav"),
+        selectedPadSampleName = "bass-loop.wav",
+        samplePlayMode = "LOOP",
+        sampleTranspose = 3,
+        sampleSnapToTempo = true,
+        sampleCutToGrid = false,
+        sampleReverse = false,
         padVolumes = padVolumes,
         padMuted = padMuted,
         columnSolo = columnSolo,

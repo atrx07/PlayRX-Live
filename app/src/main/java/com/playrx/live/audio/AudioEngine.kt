@@ -259,6 +259,62 @@ class PlaybackEngine {
     private val pattern = Array(SampleBank.PAD_COUNT) { BooleanArray(16) }
     private val activeLoops = mutableSetOf<Int>()
 
+    // Imported samples (SampleEngine, 2026-11-01): per pad, the raw
+    // decoded frames + assignment + info, and the rendered buffer
+    // actually played. Rendered buffers are rebuilt whenever BPM or
+    // project key changes, so tempo snap and key dynamics stay live.
+    private data class ImportedPad(
+        val raw: FloatArray,
+        val assignment: PadSample,
+        val info: SampleInfo,
+        var rendered: FloatArray,
+    )
+    private val importedPads = mutableMapOf<Int, ImportedPad>()
+    var projectKeyMidi: Int? = null
+        private set
+
+    fun setProjectKey(midiPitchClass: Int?) {
+        projectKeyMidi = midiPitchClass?.let { ((it % 12) + 12) % 12 }
+        refreshImportedSamples()
+    }
+
+    fun assignImportedSample(pad: Int, raw: FloatArray, assignment: PadSample, info: SampleInfo) {
+        if (pad !in 0 until SampleBank.PAD_COUNT) return
+        val rendered = SampleEngine.renderPadSample(raw, assignment, info, bpm, projectKeyMidi)
+        importedPads[pad] = ImportedPad(raw, assignment, info, rendered)
+    }
+
+    fun clearImportedSample(pad: Int) {
+        importedPads.remove(pad)
+    }
+
+    fun importedSampleName(pad: Int): String? = importedPads[pad]?.info?.name
+    fun importedSampleInfo(pad: Int): SampleInfo? = importedPads[pad]?.info
+    fun importedAssignment(pad: Int): PadSample? = importedPads[pad]?.assignment
+    fun importedPadIds(): Set<Int> = importedPads.keys.toSet()
+
+    fun updateImportedAssignment(pad: Int, assignment: PadSample) {
+        val cur = importedPads[pad] ?: return
+        importedPads[pad] = cur.copy(
+            assignment = assignment,
+            rendered = SampleEngine.renderPadSample(cur.raw, assignment, cur.info, bpm, projectKeyMidi),
+        )
+    }
+
+    /** Re-render every imported pad at the current BPM / project key. */
+    fun refreshImportedSamples() {
+        for ((pad, cur) in importedPads) {
+            importedPads[pad] = cur.copy(
+                rendered = SampleEngine.renderPadSample(cur.raw, cur.assignment, cur.info, bpm, projectKeyMidi),
+            )
+        }
+    }
+
+    /** Stop all voices belonging to one pad (GATE release). */
+    fun releasePad(pad: Int) {
+        voices.removeAll { it.sourcePad == pad }
+    }
+
     // Full-pad mixer: per-pad volume, mute, solo (48 pads) plus
     // per-column mixer (8 instrument columns, like a channel strip).
     private val padVolumes = FloatArray(SampleBank.PAD_COUNT) { 1f }
@@ -318,7 +374,7 @@ class PlaybackEngine {
 
     fun activeLoopPads(): Set<Int> = activeLoops.toSet()
 
-    private data class Voice(val sample: FloatArray, var pos: Int, val volume: Float)
+    private data class Voice(val sample: FloatArray, var pos: Int, val volume: Float, val sourcePad: Int = -1)
 
     private val pending = java.util.concurrent.ConcurrentLinkedQueue<Voice>()
     private val voices = mutableListOf<Voice>()
@@ -333,6 +389,9 @@ class PlaybackEngine {
     private val oneShotCache = mutableMapOf<Int, FloatArray>()
     private fun sample(index: Int): FloatArray =
         oneShotCache.getOrPut(index) { SampleBank.oneShot(index) }
+
+    /** Rendered imported buffer for a pad, or null if it uses synth. */
+    private fun importedSampleFor(pad: Int): FloatArray? = importedPads[pad]?.rendered
 
     fun start() {
         if (running) return
@@ -391,24 +450,47 @@ class PlaybackEngine {
 
     /** Tap a pad. One-shots fire immediately; loop pads toggle. */
     fun triggerPad(pad: Int) {
-        if (SampleBank.isLoopPad(pad)) {
+        val imported = importedSampleFor(pad)
+        val assignment = importedPads[pad]?.assignment
+        // An imported pad's play mode wins over the column default:
+        // a LOOP-mode imported sample on any column toggles like a
+        // loop pad; a ONE_SHOT imported sample on a loop column fires
+        // once. GATE is held via releasePad (see docs).
+        val isLooping = when {
+            assignment != null -> assignment.playMode == PlayMode.LOOP
+            else -> SampleBank.isLoopPad(pad)
+        }
+        if (isLooping) {
             if (activeLoops.contains(pad)) {
                 activeLoops.remove(pad)
+                // Stop any still-playing voice of this loop pad.
+                voices.removeAll { it.sourcePad == pad }
             } else {
                 activeLoops.add(pad)
                 if (!isPlaying) isPlaying = true
+                // Loop pads with imported samples are re-triggered by
+                // the transport clock (see mixLoop); synth loop pads
+                // use their 16-step pattern there. Imported loops
+                // play as a whole buffer, looped by the voice below.
+                if (imported != null) {
+                    val vol = effectiveVolume(pad, 1f)
+                    if (vol > 0f) pending.add(Voice(imported, 0, vol, pad))
+                }
             }
             onLoopsChanged?.invoke(activeLoops.toSet())
         } else {
             val vol = effectiveVolume(pad, 1f)
-            if (vol > 0f) pending.add(Voice(sample(pad), 0, vol))
+            if (vol > 0f) {
+                if (imported != null) pending.add(Voice(imported, 0, vol, pad))
+                else pending.add(Voice(sample(pad), 0, vol, pad))
+            }
         }
     }
 
     private fun triggerSample(index: Int, volume: Float = 0.9f, sourcePad: Int = -1) {
         val pad = if (sourcePad in 0 until SampleBank.PAD_COUNT) sourcePad else index
         val vol = effectiveVolume(pad, volume)
-        if (vol > 0f) pending.add(Voice(sample(index), 0, vol))
+        if (vol > 0f) pending.add(Voice(sample(index), 0, vol, pad))
     }
 
     private fun mixLoop(at: AudioTrack) {
@@ -437,6 +519,7 @@ class PlaybackEngine {
                         if (pattern[trk][step]) triggerSample(trk, 0.9f, trk)
                     }
                     for (loopPad in activeLoops.toList()) {
+                        if (importedPads.containsKey(loopPad)) continue
                         for ((s, sampleIdx) in SampleBank.loopPattern(loopPad)) {
                             if (s == step) triggerSample(sampleIdx, 0.85f, loopPad)
                         }
@@ -462,13 +545,19 @@ class PlaybackEngine {
                 while (iter.hasNext()) {
                     val v = iter.next()
                     if (v.pos >= v.sample.size) {
-                        iter.remove()
-                    } else {
-                        val s = v.sample[v.pos] * v.volume
-                        left += s
-                        right += s
-                        v.pos++
+                        // Imported loop voices loop until the pad is
+                        // toggled off; synth voices end at the buffer.
+                        if (v.sourcePad in activeLoops && importedPads.containsKey(v.sourcePad)) {
+                            v.pos = 0
+                        } else {
+                            iter.remove()
+                            continue
+                        }
                     }
+                    val s = v.sample[v.pos] * v.volume
+                    left += s
+                    right += s
+                    v.pos++
                 }
                 var dry = (left + right) * 0.5f * masterVolume
                 if (delayEnabled) {

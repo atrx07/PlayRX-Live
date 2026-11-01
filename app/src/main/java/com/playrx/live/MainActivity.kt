@@ -6,12 +6,17 @@ import android.os.Handler
 import android.os.Looper
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalConfiguration
+import com.playrx.live.audio.PlayMode
 import com.playrx.live.audio.PlaybackEngine
+import com.playrx.live.audio.PadSample
 import com.playrx.live.audio.SampleBank
+import com.playrx.live.audio.SampleInfo
+import com.playrx.live.audio.SampleStore
 import com.playrx.live.midi.MidiEngine
 import com.playrx.live.ui.PlayRxActions
 import com.playrx.live.ui.PlayRxScreen
@@ -41,6 +46,25 @@ import com.playrx.live.ui.PlayRxState
  */
 class MainActivity : ComponentActivity() {
 
+    private val importPicker = registerForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        if (uri == null) return@registerForActivityResult
+        Thread {
+            val info = SampleStore.importUri(
+                this, uri, bpm, projectKeyMidi,
+                SampleStore.categoryForColumn(SampleBank.columnOf(selectedPad)),
+            )
+            mainHandler.post {
+                if (info == null) {
+                    sampleImportError = "Could not decode that file. Try a WAV, OGG, MP3 or AAC you own."
+                } else {
+                    sampleImportError = null
+                    sampleList = SampleStore.loadManifest(this)
+                    sampleVersion++
+                }
+            }
+        }.start()
+    }
+
     private lateinit var midiEngine: MidiEngine
     private lateinit var engine: PlaybackEngine
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -59,6 +83,10 @@ class MainActivity : ComponentActivity() {
     private var mixerVersion by mutableStateOf(0)
     private var selectedTab by mutableStateOf("LOOP")
     private var selectedPanel by mutableStateOf("MIXER")
+    private var projectKeyMidi by mutableStateOf(0)
+    private var sampleList by mutableStateOf(listOf<SampleInfo>())
+    private var sampleImportError by mutableStateOf<String?>(null)
+    private var sampleVersion by mutableStateOf(0)
 
     private fun currentState(): PlayRxState {
         // Read the version counters so pad/column/step edits recompose.
@@ -66,6 +94,8 @@ class MainActivity : ComponentActivity() {
         val pattern = patternVersion
         @Suppress("UNUSED_VARIABLE")
         val mixer = mixerVersion
+        @Suppress("UNUSED_VARIABLE")
+        val sampleV = sampleVersion
         return PlayRxState(
             chordText = chordText,
             midiStatus = midiStatus,
@@ -79,6 +109,15 @@ class MainActivity : ComponentActivity() {
             editPattern = editPattern,
             selectedTab = selectedTab,
             selectedPanel = selectedPanel,
+            projectKeyMidi = projectKeyMidi,
+            samples = sampleList.map { it.name },
+            selectedPadSampleName = engine.importedSampleName(selectedPad),
+            samplePlayMode = (engine.importedAssignment(selectedPad)?.playMode?.name ?: "LOOP"),
+            sampleTranspose = engine.importedAssignment(selectedPad)?.transposeSemitones ?: 0,
+            sampleSnapToTempo = engine.importedAssignment(selectedPad)?.snapToTempo ?: true,
+            sampleCutToGrid = engine.importedAssignment(selectedPad)?.cutToGrid ?: false,
+            sampleReverse = engine.importedAssignment(selectedPad)?.reverse ?: false,
+            sampleImportError = sampleImportError,
             padVolumes = List(SampleBank.PAD_COUNT) { engine.getPadVolume(it) },
             padMuted = List(SampleBank.PAD_COUNT) { engine.isPadMuted(it) },
             padSolo = List(SampleBank.PAD_COUNT) { engine.isPadSolo(it) },
@@ -126,6 +165,7 @@ class MainActivity : ComponentActivity() {
         onBpmChange = {
             bpm = it
             engine.bpm = it
+            engine.refreshImportedSamples()
         },
         onVolumeChange = {
             masterVolume = it
@@ -138,6 +178,60 @@ class MainActivity : ComponentActivity() {
         onEditToggle = { editPattern = !editPattern },
         onTabSelect = { selectedTab = it },
         onPanelSelect = { selectedPanel = it },
+        onProjectKeyChange = { key ->
+            projectKeyMidi = key
+            engine.setProjectKey(key)
+        },
+        onImportSample = { importPicker.launch("audio/*") },
+        onAssignSample = { name ->
+            val info = sampleList.firstOrNull { it.name == name } ?: return@onAssignSample
+            val decoded = SampleStore.decodeStored(this, info) ?: run {
+                sampleImportError = "Could not decode ${info.name} again."
+                return@onAssignSample
+            }
+            val mode = if (SampleBank.isLoopPad(selectedPad)) PlayMode.LOOP else PlayMode.ONE_SHOT
+            // Key dynamics read the category from SampleInfo. The
+            // category follows the *target* pad's column, not the
+            // pad that happened to be selected at import time, so
+            // a sample assigned to a drum column stays exempt and
+            // one assigned to a melodic column follows the key.
+            val targetInfo = info.copy(
+                category = SampleStore.categoryForColumn(SampleBank.columnOf(selectedPad)),
+            )
+            engine.assignImportedSample(
+                selectedPad,
+                decoded.frames,
+                PadSample(pad = selectedPad, sampleId = info.id, playMode = mode),
+                targetInfo,
+            )
+            sampleVersion++
+        },
+        onSamplePlayMode = { mode ->
+            val cur = engine.importedAssignment(selectedPad) ?: return@onSamplePlayMode
+            val parsed = runCatching { PlayMode.valueOf(mode) }.getOrNull() ?: return@onSamplePlayMode
+            engine.updateImportedAssignment(selectedPad, cur.copy(playMode = parsed))
+            sampleVersion++
+        },
+        onSampleTranspose = { semitones ->
+            val cur = engine.importedAssignment(selectedPad) ?: return@onSampleTranspose
+            engine.updateImportedAssignment(selectedPad, cur.copy(transposeSemitones = semitones))
+            sampleVersion++
+        },
+        onSampleSnapToggle = {
+            val cur = engine.importedAssignment(selectedPad) ?: return@onSampleSnapToggle
+            engine.updateImportedAssignment(selectedPad, cur.copy(snapToTempo = !cur.snapToTempo))
+            sampleVersion++
+        },
+        onSampleCutToggle = {
+            val cur = engine.importedAssignment(selectedPad) ?: return@onSampleCutToggle
+            engine.updateImportedAssignment(selectedPad, cur.copy(cutToGrid = !cur.cutToGrid))
+            sampleVersion++
+        },
+        onSampleReverseToggle = {
+            val cur = engine.importedAssignment(selectedPad) ?: return@onSampleReverseToggle
+            engine.updateImportedAssignment(selectedPad, cur.copy(reverse = !cur.reverse))
+            sampleVersion++
+        },
         onPadVolume = { pad, volume ->
             engine.setPadVolume(pad, volume)
             mixerVersion++
@@ -174,6 +268,8 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
 
         engine = PlaybackEngine()
+        engine.setProjectKey(projectKeyMidi)
+        sampleList = SampleStore.loadManifest(this)
         engine.bpm = bpm
         engine.masterVolume = masterVolume
         engine.onStepChanged = { step ->

@@ -36,6 +36,19 @@ data class PlayRxState(
     val columnSolo: List<Boolean> = List(SampleBank.COLUMNS) { false },
     /** steps[pad][step], 48 x 16. Only the selected pad's row is drawn. */
     val steps: List<List<Boolean>> = List(SampleBank.PAD_COUNT) { List(16) { false } },
+    // ---- Sample import / advanced engine (2026-11-01) ----
+    /** Project key as a pitch class 0..11 (C=0). Drives key dynamics. */
+    val projectKeyMidi: Int = 0,
+    /** Names in the SAMPLES collection, in manifest order. */
+    val samples: List<String> = emptyList(),
+    /** Sample assigned to the selected pad, or null = built-in synth. */
+    val selectedPadSampleName: String? = null,
+    val samplePlayMode: String = "LOOP",
+    val sampleTranspose: Int = 0,
+    val sampleSnapToTempo: Boolean = true,
+    val sampleCutToGrid: Boolean = false,
+    val sampleReverse: Boolean = false,
+    val sampleImportError: String? = null,
 )
 
 /** Every user action the screen can trigger. No-ops by default for screenshots. */
@@ -57,4 +70,12 @@ data class PlayRxActions(
     val onColumnMuteToggle: (Int) -> Unit = {},
     val onColumnSoloToggle: (Int) -> Unit = {},
     val onStepToggle: (Int, Int) -> Unit = { _, _ -> },
+    val onProjectKeyChange: (Int) -> Unit = {},
+    val onImportSample: () -> Unit = {},
+    val onAssignSample: (String) -> Unit = {},
+    val onSamplePlayMode: (String) -> Unit = {},
+    val onSampleTranspose: (Int) -> Unit = {},
+    val onSampleSnapToggle: () -> Unit = {},
+    val onSampleCutToggle: () -> Unit = {},
+    val onSampleReverseToggle: () -> Unit = {},
 )

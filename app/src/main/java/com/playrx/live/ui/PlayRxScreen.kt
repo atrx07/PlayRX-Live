@@ -111,6 +111,9 @@ fun PlayRxScreen(
     }
 }
 
+private val PitchNames = listOf("C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B")
+private fun pitchName(pc: Int): String = PitchNames[((pc % 12) + 12) % 12]
+
 private fun columnColor(col: Int): Color = when (col) {
     0 -> Color(0xFFD32F2F) // Kick red
     1 -> Color(0xFFEF6C00) // Snare orange
@@ -362,6 +365,69 @@ private fun BottomPanel(state: PlayRxState, actions: PlayRxActions, modifier: Mo
                     }
                 }
                 PadEditPanel(state, actions)
+                // Advanced sample engine (2026-11-01): these controls
+                // only change the sound when a sample is assigned to
+                // the selected pad; with the built-in synth they are
+                // shown for the pad's future sample, not faked as live.
+                Text(
+                    "Sample: ${state.selectedPadSampleName ?: "Built-in synth (no sample assigned)"}",
+                    style = MaterialTheme.typography.bodySmall, color = TextDim,
+                )
+                Text("Play mode", color = TextMain)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    for (mode in listOf("LOOP", "ONE_SHOT", "GATE")) {
+                        val sel = state.samplePlayMode == mode
+                        Button(
+                            onClick = { actions.onSamplePlayMode(mode) },
+                            contentPadding = PaddingValues(4.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = if (sel) AccentAmber else DarkTab,
+                                contentColor = if (sel) Color.Black else TextDim,
+                            ),
+                        ) {
+                            Text(mode, fontSize = 10.sp, maxLines = 1, softWrap = false)
+                        }
+                    }
+                }
+                Text("Transpose: ${state.sampleTranspose} semitones", color = TextMain)
+                Slider(
+                    value = state.sampleTranspose.toFloat(),
+                    onValueChange = { actions.onSampleTranspose(it.toInt()) },
+                    valueRange = -12f..12f, steps = 23,
+                    colors = SliderDefaults.colors(thumbColor = Color.White, activeTrackColor = AccentAmber, inactiveTrackColor = DarkTab),
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    val snap = state.sampleSnapToTempo
+                    Button(
+                        onClick = actions.onSampleSnapToggle,
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (snap) AccentAmber else DarkTab,
+                            contentColor = if (snap) Color.Black else TextMain,
+                        ),
+                    ) { Text(if (snap) "Snap: On" else "Snap: Off") }
+                    val cut = state.sampleCutToGrid
+                    Button(
+                        onClick = actions.onSampleCutToggle,
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (cut) AccentAmber else DarkTab,
+                            contentColor = if (cut) Color.Black else TextMain,
+                        ),
+                    ) { Text(if (cut) "Cut: On" else "Cut: Off") }
+                    val rev = state.sampleReverse
+                    Button(
+                        onClick = actions.onSampleReverseToggle,
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (rev) AccentAmber else DarkTab,
+                            contentColor = if (rev) Color.Black else TextMain,
+                        ),
+                    ) { Text(if (rev) "Reverse: On" else "Reverse") }
+                }
+                Text(
+                    "Snap = tempo-stretch to project BPM, pitch kept. " +
+                        "Cut = start/end snap to the 16th grid at project BPM. " +
+                        "Project key (in Mixer) transposes melodic samples; drums do not follow it.",
+                    style = MaterialTheme.typography.bodySmall, color = TextDim,
+                )
             }
             "FX" -> {
                 Text("FX — Delay for now; beat-repeat and XY pad come next.", style = MaterialTheme.typography.bodySmall, color = TextDim)
@@ -372,14 +438,48 @@ private fun BottomPanel(state: PlayRxState, actions: PlayRxActions, modifier: Mo
             }
             "SAMPLES" -> {
                 Text(
-                    "Samples / Collection — next: import your own WAV/OGG " +
-                        "in PlayRX's own manifest format. No copied packs.",
+                    "Samples / Collection — your own files only. Import a " +
+                        "WAV, OGG, MP3 or AAC you own; it is copied into " +
+                        "app-private storage and saved in PlayRX's own manifest. " +
+                        "No copied packs, ever.",
                     style = MaterialTheme.typography.bodySmall, color = TextDim,
                 )
+                Button(
+                    onClick = actions.onImportSample,
+                    colors = ButtonDefaults.buttonColors(containerColor = AccentAmber, contentColor = Color.Black),
+                ) {
+                    Text("Import sample…")
+                }
+                if (state.sampleImportError != null) {
+                    Text(state.sampleImportError, style = MaterialTheme.typography.bodySmall, color = Color(0xFFFF6B6B))
+                }
+                if (state.samples.isEmpty()) {
+                    Text("No samples yet.", style = MaterialTheme.typography.bodySmall, color = TextDim)
+                } else {
+                    for (name in state.samples) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text(name, modifier = Modifier.weight(1f), color = TextMain, maxLines = 1)
+                            Button(
+                                onClick = { actions.onAssignSample(name) },
+                                contentPadding = PaddingValues(4.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = DarkTab, contentColor = TextMain),
+                            ) {
+                                Text("Assign")
+                            }
+                        }
+                    }
+                }
             }
             else -> {
                 Text("Mixer — VOLUMES", style = MaterialTheme.typography.bodySmall, color = TextDim)
                 TempoControls(state, actions)
+                Text("Project key: ${pitchName(state.projectKeyMidi)} — melodic samples follow it, drums do not.", color = TextMain)
+                Slider(
+                    value = state.projectKeyMidi.toFloat(),
+                    onValueChange = { actions.onProjectKeyChange(it.toInt()) },
+                    valueRange = 0f..11f, steps = 10,
+                    colors = SliderDefaults.colors(thumbColor = Color.White, activeTrackColor = AccentAmber, inactiveTrackColor = DarkTab),
+                )
                 ColumnMixer(state, actions)
             }
         }
