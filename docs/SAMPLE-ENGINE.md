@@ -172,3 +172,49 @@ still play out while paused.
   entry, clears every pad using that sample back to the
   built-in synth, and stops any playing voice of it. Your
   original file on the device is untouched — PlayRX only copied it.
+
+## Stretch audit + live tempo fix (2026-11-02)
+
+User report: "detection works now but it doesn't stretch or
+match to the project tempo — the only thing that changes is
+how it fires when the project track starts." Audit found the
+render itself was mostly sound (fresh assigns stretched), and
+two real bugs that made it *look* unstretched in normal use:
+
+1. **Playing loops never heard a re-render (main bug).** A
+   loop voice holds a reference to the buffer it started with.
+   BPM change, Detect tempo, Original BPM edit, transpose, and
+   project-key change all re-rendered the stored buffer but
+   left the sounding voice on the old buffer. Only stop +
+   re-trigger picked the new tempo up. Synth loops never had
+   this bug — they are pattern-driven from the transport clock.
+   Fix: any re-render flags a voice swap; the mixer thread
+   swaps active imported-loop voices to the new buffer at the
+   transport-aligned position (totalBeats modulo the loop's
+   bar cycle), so a BPM change lands in phase with the beat
+   counter and synth loops, with no gap and no restart. Paused
+   voices swap the same way and resume in phase. One-shots
+   are never swapped — a fired one-shot is an event, not a loop.
+2. **Pitch + tempo double-counted for one-shots.** The tempo
+   stretch was applied to the already pitch-resampled buffer
+   at tempoRate, so a transposed one-shot came out short/long
+   by the pitch factor (octave up = half duration, even with
+   Snap on at the same BPM). LOOP pads were accidentally saved
+   by bar snap recomputing the total stretch; one-shots were
+   not. Fix: tempo stretch on a pitched buffer is
+   tempoRate / pitchRate, so afterTempo is exactly the
+   tempo-correct length before bar snap.
+3. **WSOLA jitter on drums.** When the overlap region is
+   silence, every search candidate scores ~0 and the search
+   picked an arbitrary offset up to 512 samples (11 ms) per
+   grain — enough to read as "doesn't match the tempo" even
+   though total length was exactly a bar. Fix: if the expected
+   position scores within 10% of the searched best, the
+   expected position wins; tonal material still gets the
+   searched (phase-aligned) position, where the gain is large.
+
+Tests added for this round prove beats, not just length: a
+100 BPM click loop rendered at 120 BPM must have bursts on
+every 0.5 s beat and quiet mid-beats, a transposed one-shot
+must keep its tempo length, and a transposed loop must still
+land on exactly 2 bars at 120 BPM.

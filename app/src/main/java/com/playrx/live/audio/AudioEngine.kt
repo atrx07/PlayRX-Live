@@ -5,6 +5,7 @@ import android.media.AudioFormat
 import android.media.AudioTrack
 import kotlin.math.PI
 import kotlin.math.exp
+import kotlin.math.roundToInt
 import kotlin.math.sin
 
 /**
@@ -292,6 +293,7 @@ class PlaybackEngine {
         if (pad !in 0 until SampleBank.PAD_COUNT) return
         val rendered = SampleEngine.renderPadSample(raw, assignment, info, bpm, projectKeyMidi)
         importedPads[pad] = ImportedPad(raw, assignment, info, rendered)
+        requestVoiceSwap()
     }
 
     fun clearImportedSample(pad: Int) {
@@ -322,6 +324,7 @@ class PlaybackEngine {
             assignment = assignment,
             rendered = SampleEngine.renderPadSample(cur.raw, assignment, cur.info, bpm, projectKeyMidi),
         )
+        requestVoiceSwap()
     }
 
     /** Re-detect the tempo of the sample on [pad] from its raw
@@ -346,6 +349,7 @@ class PlaybackEngine {
                 )
             }
         }
+        requestVoiceSwap()
     }
 
     /** Re-render every imported pad at the current BPM / project key. */
@@ -355,6 +359,63 @@ class PlaybackEngine {
                 rendered = SampleEngine.renderPadSample(cur.raw, cur.assignment, cur.info, bpm, projectKeyMidi),
             )
         }
+        requestVoiceSwap()
+    }
+
+    /**
+     * Live tempo/key swap (2026-11-02 audit fix, the reported bug).
+     *
+     * Until now, re-rendering only replaced the buffer stored in
+     * [importedPads]. A loop voice already playing holds a direct
+     * reference to the buffer it was started with, so it kept
+     * playing the OLD tempo forever: changing project BPM, tapping
+     * Detect tempo, editing Original BPM, transposing, or changing
+     * the project key did literally nothing to a loop already
+     * sounding. Only stop + re-trigger picked the new render up,
+     * which is why the user reported "detection works but it
+     * doesn't stretch" — the only audible change was the bar-sync
+     * start of a newly tapped loop. Synth loops never had this bug:
+     * they are pattern-driven from the transport clock, so BPM
+     * changes reach them immediately; imported loops are
+     * pre-rendered buffers, so they needed this swap.
+     *
+     * The swap itself runs in the mixer thread (see mixLoop), not
+     * here, so the voice list is never mutated from the UI thread
+     * mid-iteration. This method only flags that a swap is due, and
+     * only when an imported loop is actually active — a BPM change
+     * with no imported loop playing costs nothing.
+     */
+    @Volatile private var voiceSwapRequested = false
+
+    private fun requestVoiceSwap() {
+        if (activeLoops.any { importedPads.containsKey(it) }) {
+            voiceSwapRequested = true
+        }
+    }
+
+    /**
+     * Position in [rendered] that corresponds to the current
+     * transport position, for a loop that starts on a bar. A loop
+     * rendered to whole bars at the new BPM has
+     * rendered.size / barFrames whole bars; its position within
+     * the current bar-cycle is totalBeats modulo that cycle. Using
+     * the transport position (not a scaled old position) is what
+     * keeps a re-rendered loop in phase with the beat counter and
+     * with synth loops after a BPM change — the old position was
+     * measured in the old tempo and would drift by exactly the
+     * tempo ratio on every repeat.
+     */
+    private fun transportAlignedPos(renderedSize: Int, sample: FloatArray, oldPos: Int): Int {
+        if (renderedSize <= 0) return 0
+        val barFrames = (SampleBank.SAMPLE_RATE * 60.0 / bpm * 4).toInt()
+        if (barFrames <= 0) {
+            return ((oldPos.toLong() * renderedSize / sample.size.coerceAtLeast(1)).toInt())
+                .coerceIn(0, renderedSize - 1)
+        }
+        val loopBars = maxOf(1, (renderedSize.toDouble() / barFrames).roundToInt())
+        val beatsPerLoop = loopBars * 4.0
+        val posBeats = totalBeats % beatsPerLoop
+        return ((posBeats / beatsPerLoop) * renderedSize).toInt().coerceIn(0, renderedSize - 1)
     }
 
     /** Stop all voices belonging to one pad (GATE release). */
@@ -490,6 +551,7 @@ class PlaybackEngine {
 
     fun stopAll() {
         voices.clear()
+        voiceSwapRequested = false
         activeLoops.clear()
         pendingLoops.clear()
         onLoopsChanged?.invoke(emptySet())
@@ -633,6 +695,38 @@ class PlaybackEngine {
                         voices.add(v)
                     }
                 }
+            }
+            // Live re-render swap: if BPM, key, Detect, or any
+            // EDIT change re-rendered an imported loop that is
+            // already sounding, swap its voice to the new buffer
+            // HERE, in the mixer thread, at the transport-aligned
+            // position — not at the next trigger, and not at its
+            // old (wrong-tempo) position. Paused voices get the
+            // same swap; they stay frozen (transportLocked) until
+            // resume, so they resume at the new tempo in phase.
+            // One-shot voices are never swapped: a one-shot that
+            // already fired is an event, not a loop.
+            if (voiceSwapRequested) {
+                voiceSwapRequested = false
+                val swapped = mutableListOf<Voice>()
+                val swapIter = voices.iterator()
+                while (swapIter.hasNext()) {
+                    val v = swapIter.next()
+                    if (v.transportLocked && v.sourcePad in activeLoops) {
+                        val rendered = importedPads[v.sourcePad]?.rendered
+                        if (rendered != null && rendered.isNotEmpty() && rendered !== v.sample) {
+                            swapIter.remove()
+                            swapped.add(
+                                Voice(
+                                    rendered,
+                                    transportAlignedPos(rendered.size, v.sample, v.pos),
+                                    v.volume, v.sourcePad, transportLocked = true,
+                                )
+                            )
+                        }
+                    }
+                }
+                voices.addAll(swapped)
             }
             // Delay time: dotted eighth at current BPM.
             val delaySamples = ((60.0 / bpm * 0.75) * SampleBank.SAMPLE_RATE).toInt()

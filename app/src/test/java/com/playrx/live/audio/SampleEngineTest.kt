@@ -284,6 +284,76 @@ class SampleEngineTest {
         assertEquals(input.size, out.size)
     }
 
+    // ---- Tempo-stretch audit tests, 2026-11-02 ----
+    // These prove the reported bug, not just length: a loop
+    // rendered to a new project tempo must have its *beats* on
+    // the new beat grid, not merely the right total length, and
+    // a transposed one-shot must keep its tempo length.
+
+    private fun peakInWindow(buf: FloatArray, centre: Int, halfWidth: Int): Float {
+        val lo = maxOf(0, centre - halfWidth)
+        val hi = minOf(buf.size - 1, centre + halfWidth)
+        if (hi < lo) return 0f
+        var peak = 0f
+        for (i in lo..hi) peak = maxOf(peak, kotlin.math.abs(buf[i]))
+        return peak
+    }
+
+    @Test
+    fun render_loopClickTrack_onsetsLandOnProjectBeatGrid() {
+        // 100 BPM click track, 4.8 s = 8 beats = 2 bars, assigned
+        // to a drum loop pad. At project 120 BPM it must come out
+        // as exactly 2 bars (4.0 s = 176400 frames) with a burst
+        // on every 0.5 s beat — and quiet mid-beats. A stretch
+        // that only got the length right but smeared/jittered the
+        // beats would fail the mid-beat check.
+        val input = clickTrack(100f, 4.8)
+        val out = SampleEngine.renderPadSample(
+            input,
+            assignment().copy(playMode = PlayMode.LOOP, snapToTempo = true),
+            info(bpm = 100f, cat = SampleCategory.DRUM), 120f, 0
+        )
+        assertTrue("out ${out.size} should be near 176400 (2 bars at 120)", kotlin.math.abs(out.size - 176400) < 3000)
+        val beatFrames = 22050
+        for (beat in 0 until 8) {
+            val centre = beat * beatFrames
+            val onBeat = peakInWindow(out, centre, 1102)
+            assertTrue("beat $beat peak $onBeat should be > 0.2", onBeat > 0.2f)
+            val midBeat = peakInWindow(out, centre + beatFrames / 2, 1102)
+            assertTrue("mid-beat $beat peak $midBeat should be < 0.2", midBeat < 0.2f)
+        }
+    }
+
+    @Test
+    fun render_oneShot_pitchPlusTempo_keepsTempoLength() {
+        // Octave up + Snap on, project BPM = original BPM: the
+        // pitched buffer is half length, the tempo stretch must
+        // double it back — final length is the original length,
+        // not half. Before the 2026-11-02 audit fix this came out
+        // at half length (tempoRate was applied to the pitched
+        // buffer without dividing by the pitch rate).
+        val input = clickTrack(120f, 2.0)
+        val out = SampleEngine.renderPadSample(
+            input,
+            assignment().copy(playMode = PlayMode.ONE_SHOT, transposeSemitones = 12, snapToTempo = true),
+            info(bpm = 120f, cat = SampleCategory.MELODY), 120f, 0
+        )
+        assertTrue("out ${out.size} should be near ${input.size}, not half", kotlin.math.abs(out.size - input.size) < input.size * 0.05)
+    }
+
+    @Test
+    fun render_loop_pitchPlusTempo_snapsToBar() {
+        // 100 BPM, 2-bar click loop, transposed +5 semitones,
+        // project 120 BPM: still exactly 2 bars at 120.
+        val input = clickTrack(100f, 4.8)
+        val out = SampleEngine.renderPadSample(
+            input,
+            assignment().copy(playMode = PlayMode.LOOP, transposeSemitones = 5, snapToTempo = true),
+            info(bpm = 100f, cat = SampleCategory.MELODY), 120f, 0
+        )
+        assertTrue("out ${out.size} should be near 176400", kotlin.math.abs(out.size - 176400) < 3000)
+    }
+
     @Test
     fun parseWav_rejectsNonWav() {
         assertNull(SampleEngine.parseWav(byteArrayOf(1, 2, 3, 4)))

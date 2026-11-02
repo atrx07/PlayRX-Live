@@ -304,7 +304,22 @@ object SampleEngine {
                 if (e < bestErr) { bestErr = e; best = c2 }
                 c2++
             }
-            readPos = best
+            // Audit fix 2026-11-02: prefer the expected position
+            // when it is nearly as good as the searched one. For
+            // sparse drum material the overlap region is often
+            // silence, where every candidate scores ~0 and the
+            // search picks an arbitrary offset up to 512 samples
+            // off — per grain, that is up to 11 ms of timing
+            // jitter, which reads as a loop that "doesn't match
+            // the project tempo" even though its total length is
+            // exactly a bar. Tonal material still gets the searched
+            // position, because there the phase gain is large.
+            val expectedErr = errorAt(expected)
+            if (expectedErr <= bestErr * 1.10) {
+                readPos = expected
+            } else {
+                readPos = best
+            }
             place(readPos, writePos)
             prevGrainStart = readPos
             writePos += hopS
@@ -407,15 +422,28 @@ object SampleEngine {
         // above Nyquist/rate would otherwise fold back harshly.
         val semitones = totalTransposeSemitones(assignment, info, projectKeyMidi)
         var stretchRate = 1.0
+        // Audit fix 2026-11-02: pitch resampling changes duration,
+        // so the tempo stretch applied to the *pitched* buffer must
+        // be tempoRate / pitchRate, not tempoRate. With the old
+        // value a transposed one-shot came out short/long by the
+        // pitch factor (an octave up played at half duration even
+        // with Snap on and project BPM = original BPM). LOOP pads
+        // were accidentally saved by bar snap, which recomputes
+        // the total stretch to a whole bar; one-shots have no bar
+        // snap, so they carried the bug audibly. With the corrected
+        // rate, afterTempo below is exactly the tempo-correct
+        // length, and bar snap then only rounds to whole bars.
+        var pitchRateValue = 1.0
         if (semitones != 0) {
             val pr = pitchRate(semitones)
+            pitchRateValue = pr
             if (pr > 1.0) {
                 buf = lowPass(buf, (outRate / 2f / pr).toFloat(), outRate)
             }
             buf = resample(buf, pr)
         }
         if (assignment.snapToTempo) {
-            val rate = tempoRate(projectBpm, info.originalBpm)
+            val rate = tempoRate(projectBpm, info.originalBpm) / pitchRateValue
             if (rate != 1.0) stretchRate = rate
         }
         // LOOP bar snap, folded into the same stretch: compute the
