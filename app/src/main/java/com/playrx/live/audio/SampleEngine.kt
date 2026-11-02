@@ -533,7 +533,7 @@ object SampleEngine {
         // within 5% of the detected BPM, it is the better answer.
         val durationSec = data.size.toDouble() / sampleRate
         var snapped = bpm
-        var bestErr = 0.05
+        var bestErr = 0.05f
         for (beats in listOf(4, 8, 16, 32, 64)) {
             val candidate = (beats * 60.0 / durationSec).toFloat()
             if (candidate < 60f || candidate > 200f) continue

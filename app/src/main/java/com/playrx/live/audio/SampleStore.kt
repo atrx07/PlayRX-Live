@@ -76,7 +76,7 @@ object SampleStore {
         val wav = SampleEngine.parseWav(bytes)
         // Decoded frames + rate, from WAV or MediaCodec, for both
         // the manifest and tempo detection below.
-        val decoded: SampleEngine.WavData? = if (wav != null) {
+        val decoded: SampleEngine.WavData = if (wav != null) {
             wav
         } else {
             val d = SampleDecoder.decodeToPcm(context, uri) ?: run {
