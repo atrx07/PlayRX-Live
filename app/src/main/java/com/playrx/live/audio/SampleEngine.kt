@@ -480,7 +480,16 @@ object SampleEngine {
                 env[h] = kotlin.math.sqrt(sum / win).toFloat()
             }
             // Remove the mean so autocorrelation measures variation, not level.
+            // But first: if the envelope barely varies at all (a flat
+            // tone, a pad), there is no rhythm to detect — return
+            // silence so autocorrelation finds nothing. Without this,
+            // normalized autocorrelation invents a tempo from the
+            // tiny numerical ripple in a constant sine's RMS.
             val mean = env.average().toFloat()
+            var varSum = 0.0
+            for (v in env) varSum += (v - mean) * (v - mean)
+            val std = kotlin.math.sqrt(varSum / env.size.coerceAtLeast(1))
+            if (mean > 0f && std < 0.05f * mean) return FloatArray(env.size)
             for (i in env.indices) env[i] -= mean
             return env
         }
