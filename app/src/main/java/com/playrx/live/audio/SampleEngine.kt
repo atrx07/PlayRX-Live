@@ -224,32 +224,86 @@ object SampleEngine {
      * Grain 1024, analysis hop 512, synthesis hop = 512 / rate.
      * Hann window, so overlapping grains crossfade instead of clicking.
      */
+    /**
+     * Windowed synchronous overlap-add (WSOLA) time-stretch:
+     * [rate] > 1 = faster/shorter, pitch preserved (the input is
+     * already pitch-shifted if needed).
+     *
+     * Two fixes over the naive OLA that shipped in v1 (and that a
+     * unit test caught, 2026-11-02):
+     * - Fixed synthesis hop (512, 50% overlap) with the analysis
+     *   hop scaled by rate, instead of a fixed analysis hop with a
+     *   varying synthesis hop. The old version left gaps when
+     *   slowing down (synthesis hop = grain size) and over-overlapped
+     *   when speeding up, so the level throbbed even after window
+     *   normalization.
+     * - Pitch-period search: each grain after the first is chosen
+     *   near its expected input position (±256 samples, coarse then
+     *   fine) to minimize the difference between the previous
+     *   grain's tail and the new grain's head in the overlap region.
+     *   Without this, a tonal loop's grains land at arbitrary phase
+     *   and cancel in the overlap — a sine stretched 2x dipped
+     *   below 0.7 amplitude in the middle, which is exactly the
+     *   "trash" quality reported on the phone.
+     * Grain 1024, Hann window, window-sum normalization so the
+     * output level stays flat at the edges and in the overlap.
+     */
     fun timeStretch(input: FloatArray, rate: Double): FloatArray {
         if (input.isEmpty() || rate <= 0.0) return FloatArray(0)
         if (rate == 1.0) return input.copyOf()
         val grain = 1024
-        val hopA = 512
-        val hopS = (hopA / rate).toInt().coerceAtLeast(1)
+        val hopS = 512
+        val hopA = (hopS * rate).toInt().coerceAtLeast(1)
         val outLen = (input.size / rate).toInt().coerceAtLeast(grain)
         val out = FloatArray(outLen + grain)
-        // Window-sum normalization: with hopS != 512 the overlapping
-        // Hann windows no longer sum to 1, so without this the
-        // output throbs (amplitude modulation) and clips in places.
-        // Dividing by the accumulated window sum restores a flat
-        // level — this was the main audible "trash" in tempo-stretched
-        // loops, not the stretch itself.
         val winSum = FloatArray(outLen + grain)
         val window = FloatArray(grain) { i ->
             (0.5 * (1 - kotlin.math.cos(2 * PI * i / (grain - 1)))).toFloat()
         }
-        var readPos = 0
-        var writePos = 0
-        while (readPos + grain <= input.size && writePos + grain <= out.size) {
+        fun place(readPos: Int, writePos: Int) {
             for (i in 0 until grain) {
+                if (readPos + i >= input.size || writePos + i >= out.size) break
                 out[writePos + i] += input[readPos + i] * window[i]
                 winSum[writePos + i] += window[i]
             }
-            readPos += hopA
+        }
+        var readPos = 0
+        var writePos = 0
+        place(readPos, writePos)
+        var prevGrainStart = readPos
+        writePos += hopS
+        while (writePos + grain <= out.size) {
+            val expected = prevGrainStart + hopA
+            if (expected + grain > input.size) break
+            // Coarse search, then refine around the best candidate.
+            fun errorAt(cand: Int): Double {
+                var err = 0.0
+                for (i in 0 until hopS) {
+                    val d = (input[prevGrainStart + hopS + i] - input[cand + i]).toDouble()
+                    err += d * d
+                }
+                return err
+            }
+            val lo = maxOf(0, expected - 256)
+            val hi = minOf(input.size - grain, expected + 256)
+            var best = expected
+            var bestErr = Double.MAX_VALUE
+            var c = lo
+            while (c <= hi) {
+                val e = errorAt(c)
+                if (e < bestErr) { bestErr = e; best = c }
+                c += 4
+            }
+            var c2 = maxOf(lo, best - 4)
+            val hi2 = minOf(hi, best + 4)
+            while (c2 <= hi2) {
+                val e = errorAt(c2)
+                if (e < bestErr) { bestErr = e; best = c2 }
+                c2++
+            }
+            readPos = best
+            place(readPos, writePos)
+            prevGrainStart = readPos
             writePos += hopS
         }
         for (i in 0 until outLen) {
