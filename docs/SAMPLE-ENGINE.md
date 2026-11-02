@@ -218,3 +218,16 @@ Tests added for this round prove beats, not just length: a
 every 0.5 s beat and quiet mid-beats, a transposed one-shot
 must keep its tempo length, and a transposed loop must still
 land on exactly 2 bars at 120 BPM.
+
+4. **WSOLA search drift (found by that onset test).** The
+   search was centred on the previous *searched* position, so
+   a systematic phase bias accumulated — for a periodic signal
+   the search kept advancing by a whole period instead of the
+   tempo hop, the input was consumed too fast, and the tail of
+   the stretched loop came out silent (beats 2+ of a click loop
+   vanished in simulation, even though total length was exactly
+   a bar). Fix: the search is now anchored to an ideal position
+   that advances by exactly hopA per grain, independent of the
+   search offset, so the effective stretch rate is exactly the
+   requested rate. Verified in simulation before pushing: all 8
+   beats present at 0.92 peak, mid-beats silent.

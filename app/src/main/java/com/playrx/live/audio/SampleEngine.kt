@@ -274,9 +274,25 @@ object SampleEngine {
         var writePos = 0
         place(readPos, writePos)
         var prevGrainStart = readPos
+        // Audit fix 2026-11-02 (the failing onset test, and a
+        // real stretch bug, not just a test bug): the search
+        // centre must be an *ideal* position that advances by
+        // exactly hopA per grain, independent of the previous
+        // grain's search offset. The old code centred the search
+        // on the previous *searched* position, so a systematic
+        // phase bias accumulated: for a periodic signal the
+        // search kept advancing by a whole period (e.g. 735
+        // frames for a 60 Hz burst) instead of hopA (614), the
+        // input was consumed far too fast, and the tail of the
+        // stretched loop came out silent — beats 2+ of a click
+        // loop vanished entirely in simulation, even though the
+        // total length was exactly a bar. Anchoring to ideal
+        // keeps the effective rate exactly at `rate`, no matter
+        // how the search jitters individual grains.
+        var idealRead = hopA
         writePos += hopS
         while (writePos + grain <= out.size) {
-            val expected = prevGrainStart + hopA
+            val expected = idealRead
             if (expected + grain > input.size) break
             // Coarse search, then refine around the best candidate.
             fun errorAt(cand: Int): Double {
@@ -322,6 +338,7 @@ object SampleEngine {
             }
             place(readPos, writePos)
             prevGrainStart = readPos
+            idealRead += hopA
             writePos += hopS
         }
         for (i in 0 until outLen) {
