@@ -643,15 +643,48 @@ object SampleEngine {
             var maxVal = 0.0
             for (lag in lagMin..lagMax) if (ac[lag] > maxVal) maxVal = ac[lag]
             if (maxVal < 0.25) return null
+            // Peak-picking fix (2026-11-02, melody-loop bug):
+            // the old code took the *earliest* lag at >= 90% of
+            // the max, then applied parabolic refinement to it
+            // unclamped. For a melodic loop the RMS envelope is
+            // smooth, so its autocorrelation peak is broad and
+            // flat-topped: the earliest >= 90% point sits on the
+            // rising edge, not on a peak, and there a - 2b + c
+            // is ~0.006, so the refinement shift exploded to
+            // ~-9 hops and turned a true 80 BPM peak into 97 BPM
+            // (reproduced exactly on a real 80 BPM melody loop:
+            // low/full both peaked at 80.7 yet returned 96.6/98.0,
+            // while flux, whose peak is sharper, returned 80.4
+            // and was outvoted). Two guards, both principled:
+            // (1) take the earliest *local* peak >= 90% of max,
+            // not any rising-edge point — a beat lag is a local
+            // peak, and this still prefers the beat over a
+            // stronger 2-beat repetition, which is what the
+            // earliest rule was for; (2) only refine a concave
+            // peak (denom < 0) and clamp the shift to half a hop,
+            // because a valid parabolic shift for a local maximum
+            // can never exceed that. With both guards the same
+            // melody loop returns 80.2 on all three envelopes.
             var bestLag = lagMin
-            for (lag in lagMin..lagMax) {
-                if (ac[lag] >= maxVal * 0.9) { bestLag = lag; break }
+            var foundLocalPeak = false
+            for (lag in (lagMin + 1) until lagMax) {
+                if (ac[lag] >= maxVal * 0.9 && ac[lag] >= ac[lag - 1] && ac[lag] >= ac[lag + 1]) {
+                    bestLag = lag; foundLocalPeak = true; break
+                }
+            }
+            if (!foundLocalPeak) {
+                for (lag in lagMin..lagMax) {
+                    if (ac[lag] == maxVal) { bestLag = lag; break }
+                }
             }
             var refined = bestLag.toDouble()
             if (bestLag > lagMin && bestLag < lagMax) {
                 val a = ac[bestLag - 1]; val b = ac[bestLag]; val c = ac[bestLag + 1]
                 val denom = a - 2 * b + c
-                if (denom != 0.0) refined += 0.5 * (a - c) / denom
+                if (denom < 0.0) {
+                    val shift = (0.5 * (a - c) / denom).coerceIn(-0.5, 0.5)
+                    refined += shift
+                }
             }
             val bpm = (60.0 * hopsPerSecond / refined).toFloat()
             if (bpm < 60f || bpm > 200f) return null

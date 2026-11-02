@@ -269,6 +269,39 @@ class SampleEngineTest {
     }
 
     @Test
+    fun detectBpm_sustainedMelodyNotesAt80() {
+        // Regression for the 2026-11-02 phone test: a real 80 BPM
+        // melody loop was detected as 97 BPM, so it never synced.
+        // Root cause was in autocorrPeak, not the envelopes: a
+        // sustained melodic loop has a broad, flat-topped
+        // autocorrelation peak, the old earliest->=90% pick landed
+        // on its rising edge, and unclamped parabolic refinement
+        // (denominator ~0.006) shifted it ~9 hops to 97 BPM, while
+        // the true peak sat at 80.7. This synthetic sustained-note
+        // loop has the same shape (a new sine note every beat,
+        // slow decay, short crossfade): the old picker returned
+        // ~76 BPM for it, the fixed picker returns 80.
+        val sampleRate = 44100
+        val beatFrames = (0.75 * sampleRate).toInt()
+        val crossfade = (0.05 * sampleRate).toInt()
+        val notes = doubleArrayOf(261.63, 293.66, 329.63, 392.0, 440.0, 392.0, 329.63, 293.66)
+        val out = FloatArray((12.0 * sampleRate).toInt())
+        for (beat in 0 until 16) {
+            val freq = notes[beat % notes.size]
+            val start = beat * beatFrames
+            val end = minOf(out.size, start + beatFrames + crossfade)
+            for (i in start until end) {
+                val t = (i - start).toDouble() / sampleRate
+                val fadeIn = if (i - start < crossfade) (i - start).toDouble() / crossfade else 1.0
+                out[i] += (kotlin.math.sin(2 * Math.PI * freq * t) * kotlin.math.exp(-t * 1.0) * fadeIn * 0.5).toFloat()
+            }
+        }
+        val detected = SampleEngine.detectBpm(out, sampleRate)
+        assertNotNull(detected)
+        assertTrue("detected $detected should be near 80, not a refinement artifact", kotlin.math.abs(detected!! - 80f) < 3f)
+    }
+
+    @Test
     fun resample_cubicKeepsSineLevel() {
         val input = SampleEngine.sineTone(440.0, 1.0)
         val up = SampleEngine.resample(input, 2.0)

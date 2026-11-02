@@ -231,3 +231,32 @@ land on exactly 2 bars at 120 BPM.
    search offset, so the effective stretch rate is exactly the
    requested rate. Verified in simulation before pushing: all 8
    beats present at 0.92 peak, mid-beats silent.
+
+## Detection v3 — melodic peak-picking fix (2026-11-02)
+
+Phone test (Datacode Fusion Downtempo Breaks, ground truth
+80 BPM): the drum break detected at 80 and stretched fine,
+but Melody Loop 01-Bb detected at 97 and never synced — with
+the wrong original BPM, bar snap stretched it to 5 bars
+instead of 4, so its beats landed at ~64 BPM against the
+project's 80. The envelopes were not wrong: a local port of
+the detector reproduced 97.3 exactly, and showed low/full
+autocorrelation peaking at 80.7 with 0.62/0.64 strength.
+The bug was peak-picking in autocorrPeak: the old code took
+the earliest lag at >= 90% of max, which for a smooth melodic
+envelope sits on the rising edge of a broad, flat-topped
+peak, then applied parabolic refinement unclamped — with
+a - 2b + c ≈ 0.006 that shift exploded to ~9 hops, turning
+80.7 into 96.6/98.0, while flux (sharper peak) returned 80.4
+and was outvoted by the two bad RMS candidates.
+Fix: take the earliest *local* peak >= 90% of max (a beat lag
+is a local peak, and this still prefers the beat over a
+stronger 2-beat repetition), and only refine a concave peak
+with the shift clamped to half a hop. Same melody loop now
+returns 80.2 on all three envelopes, then bar-snaps to 80.
+Regression test: a synthetic sustained-note loop at 80 BPM
+(new sine note every beat, slow decay, short crossfade) —
+old picker ~76 BPM, fixed picker 80 BPM. Workaround that
+always existed, and still works for any mis-detection:
+set Original BPM manually in EDIT (97 is not an octave
+error, so ×2/÷2 does not fix it — the slider does).
