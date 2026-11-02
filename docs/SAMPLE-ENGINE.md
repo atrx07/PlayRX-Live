@@ -147,3 +147,28 @@ still play out while paused.
   assigned loops live there. MIXER is now only the per-column
   strips. Per-pad tempo/key/quantize for an already-assigned
   sample stay in EDIT.
+
+## Tempo detection v2 + stretch v2 + delete (2026-11-02)
+
+- **Detection v2:** three onset envelopes vote — low-pass RMS
+  (kick/bass), full RMS, and spectral flux (FFT, Hann 1024) for
+  melodic loops with little level movement. Candidates within
+  4 BPM cluster; the low-pass candidate wins near-ties, because
+  kick marks beats and hats mark subdivisions. Long files use
+  their loudest 30-second segment, not a quiet intro. Bar snap
+  tightened to 3%. Half-time/double-time ambiguity is real, so
+  EDIT has one-tap **×2 / ÷2** buttons for Original BPM, and
+  manual edit is still always available.
+- **Stretch v2:** tempo snap and bar-length snap are now ONE
+  stretch, not two in a row. Resampling is cubic (not linear)
+  with an anti-alias low-pass on pitch-up. WSOLA search widened
+  to ±512 samples, grain is 1024 for drums and 2048 for melodic
+  samples, and stretches within 2% of 1.0x are skipped entirely
+  (inaudible tempo error, audible artifacts). Large stretches
+  (beyond ~±30%) will still degrade — that is a WSOLA limit, not
+  a bug to hide; prefer loops close to the project tempo.
+- **Delete samples:** SAMPLES rows now have Delete next to
+  Assign. It removes the app-private file and its manifest
+  entry, clears every pad using that sample back to the
+  built-in synth, and stops any playing voice of it. Your
+  original file on the device is untouched — PlayRX only copied it.

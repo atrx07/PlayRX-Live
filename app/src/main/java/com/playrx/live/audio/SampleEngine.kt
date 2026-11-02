@@ -201,7 +201,10 @@ object SampleEngine {
         return if (rem == 0.0) 0.0 else q - rem
     }
 
-    /** Linear-interpolation resample: rate > 1 = shorter + higher. */
+    /** Cubic (Catmull-Rom) resample: rate > 1 = shorter + higher.
+     * Linear interpolation aliases badly on pitched-up material;
+     * cubic keeps transients and highs far cleaner for the same cost
+     * class (render-time only, never realtime). */
     fun resample(input: FloatArray, rate: Double): FloatArray {
         if (input.isEmpty() || rate <= 0.0) return FloatArray(0)
         if (rate == 1.0) return input.copyOf()
@@ -211,19 +214,17 @@ object SampleEngine {
             val pos = i * rate
             val idx = pos.toInt()
             val frac = (pos - idx).toFloat()
-            val a = input.getOrElse(idx) { 0f }
-            val b = input.getOrElse(idx + 1) { a }
-            out[i] = a + (b - a) * frac
+            val p0 = input.getOrElse(idx - 1) { input.first() }
+            val p1 = input.getOrElse(idx) { 0f }
+            val p2 = input.getOrElse(idx + 1) { p1 }
+            val p3 = input.getOrElse(idx + 2) { p2 }
+            val f2 = frac * frac
+            val f3 = f2 * frac
+            out[i] = (0.5f * ((2 * p1) + (-p0 + p2) * frac + (2 * p0 - 5 * p1 + 4 * p2 - p3) * f2 + (-p0 + 3 * p1 - 3 * p2 + p3) * f3))
         }
         return out
     }
 
-    /**
-     * Windowed overlap-add time-stretch: [rate] > 1 = faster/shorter,
-     * pitch preserved (the input is already pitch-shifted if needed).
-     * Grain 1024, analysis hop 512, synthesis hop = 512 / rate.
-     * Hann window, so overlapping grains crossfade instead of clicking.
-     */
     /**
      * Windowed synchronous overlap-add (WSOLA) time-stretch:
      * [rate] > 1 = faster/shorter, pitch preserved (the input is
@@ -238,7 +239,7 @@ object SampleEngine {
      *   when speeding up, so the level throbbed even after window
      *   normalization.
      * - Pitch-period search: each grain after the first is chosen
-     *   near its expected input position (±256 samples, coarse then
+     *   near its expected input position (±512 samples, coarse then
      *   fine) to minimize the difference between the previous
      *   grain's tail and the new grain's head in the overlap region.
      *   Without this, a tonal loop's grains land at arbitrary phase
@@ -248,11 +249,13 @@ object SampleEngine {
      * Grain 1024, Hann window, window-sum normalization so the
      * output level stays flat at the edges and in the overlap.
      */
-    fun timeStretch(input: FloatArray, rate: Double): FloatArray {
+    fun timeStretch(input: FloatArray, rate: Double, grain: Int = 1024): FloatArray {
         if (input.isEmpty() || rate <= 0.0) return FloatArray(0)
         if (rate == 1.0) return input.copyOf()
-        val grain = 1024
-        val hopS = 512
+        // Skip stretches within 2%: the tempo error is inaudible,
+        // the stretch artifacts are not.
+        if (kotlin.math.abs(rate - 1.0) < 0.02) return input.copyOf()
+        val hopS = grain / 2
         val hopA = (hopS * rate).toInt().coerceAtLeast(1)
         val outLen = (input.size / rate).toInt().coerceAtLeast(grain)
         val out = FloatArray(outLen + grain)
@@ -284,8 +287,8 @@ object SampleEngine {
                 }
                 return err
             }
-            val lo = maxOf(0, expected - 256)
-            val hi = minOf(input.size - grain, expected + 256)
+            val lo = maxOf(0, expected - 512)
+            val hi = minOf(input.size - grain, expected + 512)
             var best = expected
             var bestErr = Double.MAX_VALUE
             var c = lo
@@ -396,25 +399,43 @@ object SampleEngine {
                 buf[buf.size - 1 - i] *= i.toFloat() / n
             }
         }
-        // Pitch first (resample), then tempo (OLA, pitch preserved).
+        // Pitch first (resample), then ONE tempo stretch (WSOLA,
+        // pitch preserved). V2 combines tempo snap and bar-length
+        // snap into a single stretch: v1 stretched twice in a row
+        // (tempo, then bar), and every stretch adds artifacts.
+        // Pitch-up also gets an anti-alias low-pass first: frequencies
+        // above Nyquist/rate would otherwise fold back harshly.
         val semitones = totalTransposeSemitones(assignment, info, projectKeyMidi)
-        if (semitones != 0) buf = resample(buf, pitchRate(semitones))
+        var stretchRate = 1.0
+        if (semitones != 0) {
+            val pr = pitchRate(semitones)
+            if (pr > 1.0) {
+                buf = lowPass(buf, (outRate / 2f / pr).toFloat(), outRate)
+            }
+            buf = resample(buf, pr)
+        }
         if (assignment.snapToTempo) {
             val rate = tempoRate(projectBpm, info.originalBpm)
-            if (rate != 1.0) buf = timeStretch(buf, rate)
+            if (rate != 1.0) stretchRate = rate
         }
-        // LOOP pads repeat forever: snap the length to whole bars so
-        // every repeat lands on a bar, and fade the last/first ~6 ms
-        // so the wrap point does not click on every repeat.
+        // LOOP bar snap, folded into the same stretch: compute the
+        // length after the tempo stretch, round it to whole bars,
+        // and stretch once to that length instead of twice.
+        val grain = if (info.category == SampleCategory.DRUM) 1024 else 2048
         if (assignment.playMode == PlayMode.LOOP && projectBpm > 0f && buf.size > 4096) {
+            val afterTempo = (buf.size / stretchRate).toInt()
             val barFrames = gridFrames(outRate, projectBpm, 4f)
             if (barFrames > 0) {
-                val bars = maxOf(1, ((buf.size.toDouble() / barFrames) + 0.5).toInt())
+                val bars = maxOf(1, ((afterTempo.toDouble() / barFrames) + 0.5).toInt())
                 val target = bars * barFrames
-                if (kotlin.math.abs(target - buf.size) > buf.size * 0.01) {
-                    buf = timeStretch(buf, buf.size.toDouble() / target)
+                if (kotlin.math.abs(target - afterTempo) > afterTempo * 0.02) {
+                    stretchRate = buf.size.toDouble() / target
                 }
             }
+        }
+        if (stretchRate != 1.0) buf = timeStretch(buf, stretchRate, grain)
+        // LOOP wrap fade, after stretching, so repeats do not click.
+        if (assignment.playMode == PlayMode.LOOP && buf.size > 4096) {
             val fade = minOf(256, buf.size / 4)
             for (i in 0 until fade) {
                 val f = i.toFloat() / fade
@@ -451,14 +472,64 @@ object SampleEngine {
      * Analysis is capped at the first 30 seconds so a long file
      * does not stall the import.
      */
+    /**
+     * Autodetect a sample's tempo (2026-11-02, v2 2026-11-02).
+     * Returns BPM in 60..200, or null when no clear tempo exists
+     * (one-shot, pad, noise, too short). Never throws.
+     *
+     * Why v2: v1 used only an RMS envelope. On real loops that
+     * failed in two ways — eighth-note hats pulled it to double
+     * tempo, and a flat tone's tiny RMS ripple invented a tempo
+     * (fixed by a variation check, but the envelope itself was
+     * still weak for melodic loops with no kick). V2 combines three
+     * onset envelopes and lets them vote:
+     * - Low-pass RMS (kick/bass, ~200 Hz one-pole): beats, not hats.
+     * - Full-band RMS: general energy onsets.
+     * - Spectral flux (STFT, Hann 1024, hop 512): magnitude increases
+     *   across bins — responds to pitch changes and drum hits even
+     *   when the overall level barely moves (melodic loops).
+     * Each envelope is autocorrelated for beat lags 60..200 BPM.
+     * Candidates within 4 BPM cluster together and their peaks sum;
+     * the strongest cluster wins. If no cluster forms, the strongest
+     * single candidate wins, but the low-pass (kick) candidate wins
+     * any near-tie (within 10% of the best peak) — kick onsets are
+     * the beat, hat onsets are the subdivision.
+     * Analysis uses the loudest 30-second segment for long files
+     * (a song's quiet intro must not set the tempo), and the whole
+     * file for loops (almost always under 30 s). A whole-bar snap
+     * (within 3%, tighter than v1's 5%) still applies to loops.
+     * Tempo is inherently ambiguous for half-time/double-time feels;
+     * the EDIT panel's x2 / /2 buttons exist for exactly that case,
+     * and manual edit is never removed.
+     */
     fun detectBpm(frames: FloatArray, sampleRate: Int): Float? {
         if (frames.isEmpty() || sampleRate <= 0) return null
+        if (frames.size < sampleRate) return null // under 1 second
+        // Loudest 30-second segment for long files.
         val maxFrames = sampleRate * 30
-        val data = if (frames.size > maxFrames) frames.copyOfRange(0, maxFrames) else frames
-        if (data.size < sampleRate) return null // under 1 second: no tempo to find
-        fun envelope(lowPass: Boolean): FloatArray {
-            val hop = 512
-            val win = 1024
+        val data: FloatArray = if (frames.size <= maxFrames) {
+            frames
+        } else {
+            val block = sampleRate * 5
+            var bestBlock = 0
+            var bestRms = -1.0
+            var b = 0
+            while (b * block < frames.size) {
+                val start = b * block
+                val end = minOf(frames.size, start + block)
+                var sum = 0.0
+                for (i in start until end) sum += (frames[i] * frames[i]).toDouble()
+                val rms = sum / (end - start).coerceAtLeast(1)
+                if (rms > bestRms) { bestRms = rms; bestBlock = b }
+                b++
+            }
+            val segStart = (bestBlock * block).coerceAtMost(frames.size - sampleRate * 10)
+            val segEnd = minOf(frames.size, segStart + maxFrames)
+            if (segEnd - segStart >= sampleRate * 10) frames.copyOfRange(segStart, segEnd) else frames.copyOfRange(0, maxFrames)
+        }
+        val hop = 512
+        fun rmsEnvelope(lowPass: Boolean): FloatArray {
+            val win = 512
             val n = maxOf(1, (data.size - win) / hop + 1)
             val env = FloatArray(n)
             var prev = 0f
@@ -479,24 +550,37 @@ object SampleEngine {
                 }
                 env[h] = kotlin.math.sqrt(sum / win).toFloat()
             }
-            // Remove the mean so autocorrelation measures variation, not level.
-            // But first: if the envelope barely varies at all (a flat
-            // tone, a pad), there is no rhythm to detect — return
-            // silence so autocorrelation finds nothing. Without this,
-            // normalized autocorrelation invents a tempo from the
-            // tiny numerical ripple in a constant sine's RMS.
-            val mean = env.average().toFloat()
-            var varSum = 0.0
-            for (v in env) varSum += (v - mean) * (v - mean)
-            val std = kotlin.math.sqrt(varSum / env.size.coerceAtLeast(1))
-            if (mean > 0f && std < 0.05f * mean) return FloatArray(env.size)
-            for (i in env.indices) env[i] -= mean
-            return env
+            return finishEnvelope(env)
+        }
+        fun fluxEnvelope(): FloatArray {
+            // STFT magnitude flux, Hann 1024, hop 512. Pure Kotlin FFT.
+            val fftSize = 1024
+            val nFrames = maxOf(1, (data.size - fftSize) / hop + 1)
+            val env = FloatArray(nFrames)
+            val window = DoubleArray(fftSize) { i ->
+                0.5 * (1 - kotlin.math.cos(2 * PI * i / (fftSize - 1)))
+            }
+            var prevMag = DoubleArray(fftSize / 2 + 1)
+            for (f in 0 until nFrames) {
+                val re = DoubleArray(fftSize)
+                val im = DoubleArray(fftSize)
+                for (i in 0 until fftSize) {
+                    re[i] = data[f * hop + i].toDouble() * window[i]
+                }
+                fft(re, im)
+                var flux = 0.0
+                for (k in 0..fftSize / 2) {
+                    val mag = kotlin.math.sqrt(re[k] * re[k] + im[k] * im[k])
+                    val diff = mag - prevMag[k]
+                    if (diff > 0) flux += diff
+                    prevMag[k] = mag
+                }
+                env[f] = flux.toFloat()
+            }
+            return finishEnvelope(env)
         }
         fun autocorrPeak(env: FloatArray): Pair<Float, Float>? {
-            val hop = 512
             val hopsPerSecond = sampleRate.toDouble() / hop
-            // Beat lag in hops for 60..200 BPM.
             val lagMin = (hopsPerSecond * 60.0 / 200.0).toInt().coerceAtLeast(1)
             val lagMax = (hopsPerSecond * 60.0 / 60.0).toInt()
             if (env.size <= lagMax + 4) return null
@@ -513,13 +597,11 @@ object SampleEngine {
             }
             var maxVal = 0.0
             for (lag in lagMin..lagMax) if (ac[lag] > maxVal) maxVal = ac[lag]
-            if (maxVal < 0.25) return null // no clear periodic rhythm
-            // Earliest lag within 90% of the max: beat, not its multiple.
+            if (maxVal < 0.25) return null
             var bestLag = lagMin
             for (lag in lagMin..lagMax) {
                 if (ac[lag] >= maxVal * 0.9) { bestLag = lag; break }
             }
-            // Parabolic refinement around the peak.
             var refined = bestLag.toDouble()
             if (bestLag > lagMin && bestLag < lagMax) {
                 val a = ac[bestLag - 1]; val b = ac[bestLag]; val c = ac[bestLag + 1]
@@ -530,19 +612,33 @@ object SampleEngine {
             if (bpm < 60f || bpm > 200f) return null
             return bpm to maxVal.toFloat()
         }
-        val low = autocorrPeak(envelope(lowPass = true))
-        val full = autocorrPeak(envelope(lowPass = false))
-        val (bpm, _) = when {
-            low != null && full != null -> if (low.second >= full.second) low else full
-            low != null -> low
-            full != null -> full
-            else -> return null
+        val candidates = mutableListOf<Pair<Float, Float>>()
+        val low = autocorrPeak(rmsEnvelope(lowPass = true))
+        val full = autocorrPeak(rmsEnvelope(lowPass = false))
+        val flux = autocorrPeak(fluxEnvelope())
+        if (low != null) candidates.add(low)
+        if (full != null) candidates.add(full)
+        if (flux != null) candidates.add(flux)
+        if (candidates.isEmpty()) return null
+        // Cluster candidates within 4 BPM, sum peaks per cluster.
+        val clusters = mutableListOf<MutableList<Pair<Float, Float>>>()
+        for (cand in candidates.sortedBy { it.first }) {
+            val cluster = clusters.firstOrNull { kotlin.math.abs(it[0].first - cand.first) <= 4f }
+            if (cluster != null) cluster.add(cand) else clusters.add(mutableListOf(cand))
         }
-        // Bar snap: loops are whole bars. If a whole-bar BPM is
-        // within 5% of the detected BPM, it is the better answer.
+        val bestCluster = clusters.maxByOrNull { cluster -> cluster.sumOf { it.second.toDouble() } }!!
+        var bpm = (bestCluster.sumOf { (it.first * it.second).toDouble() } / bestCluster.sumOf { it.second.toDouble() }).toFloat()
+        // Kick tie-break: if the low-pass candidate is within 10% of
+        // the best peak but was outvoted by a subdivision cluster,
+        // trust the kick — it marks beats, not subdivisions.
+        val bestPeak = candidates.maxOf { it.second }
+        if (low != null && low.second >= bestPeak * 0.9f && kotlin.math.abs(low.first - bpm) > 4f) {
+            bpm = low.first
+        }
+        // Bar snap, tightened to 3%: loops are whole bars.
         val durationSec = data.size.toDouble() / sampleRate
         var snapped = bpm
-        var bestErr = 0.05f
+        var bestErr = 0.03f
         for (beats in listOf(4, 8, 16, 32, 64)) {
             val candidate = (beats * 60.0 / durationSec).toFloat()
             if (candidate < 60f || candidate > 200f) continue
@@ -550,6 +646,62 @@ object SampleEngine {
             if (err < bestErr) { bestErr = err; snapped = candidate }
         }
         return snapped
+    }
+
+    /** Mean-removal + flat-envelope guard, shared by all envelopes. */
+    private fun finishEnvelope(env: FloatArray): FloatArray {
+        if (env.isEmpty()) return env
+        val mean = env.average().toFloat()
+        var varSum = 0.0
+        for (v in env) varSum += (v - mean) * (v - mean)
+        val std = kotlin.math.sqrt(varSum / env.size)
+        if (mean > 0f && std < 0.05f * mean) return FloatArray(env.size)
+        for (i in env.indices) env[i] -= mean
+        return env
+    }
+
+    /** Iterative radix-2 FFT, in place on [re]/[im]. Size must be a power of two. */
+    private fun fft(re: DoubleArray, im: DoubleArray) {
+        val n = re.size
+        var j = 0
+        for (i in 1 until n) {
+            var bit = n shr 1
+            while (j and bit != 0) {
+                j = j xor bit
+                bit = bit shr 1
+            }
+            j = j xor bit
+            if (i < j) {
+                val tr = re[i]; re[i] = re[j]; re[j] = tr
+                val ti = im[i]; im[i] = im[j]; im[j] = ti
+            }
+        }
+        var len = 2
+        while (len <= n) {
+            val ang = -2 * PI / len
+            val wr = kotlin.math.cos(ang)
+            val wi = kotlin.math.sin(ang)
+            var i = 0
+            while (i < n) {
+                var wpr = 1.0
+                var wpi = 0.0
+                for (k in 0 until len / 2) {
+                    val ur = re[i + k]
+                    val ui = im[i + k]
+                    val vr = re[i + k + len / 2] * wpr - im[i + k + len / 2] * wpi
+                    val vi = re[i + k + len / 2] * wpi + im[i + k + len / 2] * wpr
+                    re[i + k] = ur + vr
+                    im[i + k] = ui + vi
+                    re[i + k + len / 2] = ur - vr
+                    im[i + k + len / 2] = ui - vi
+                    val nwr = wpr * wr - wpi * wi
+                    wpi = wpr * wi + wpi * wr
+                    wpr = nwr
+                }
+                i += len
+            }
+            len *= 2
+        }
     }
 
     // ---- WAV parsing (PCM 16/24/32 + float32, RIFF, mono-mixed) ----

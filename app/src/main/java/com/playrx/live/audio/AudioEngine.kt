@@ -298,6 +298,19 @@ class PlaybackEngine {
         importedPads.remove(pad)
     }
 
+    /** Clear every pad using [sampleId] (delete-sample path):
+     * stops their voices, un-arms and un-activates them. */
+    fun clearImportedSamplesById(sampleId: String) {
+        val pads = importedPads.filter { it.value.info.id == sampleId }.keys.toList()
+        for (pad in pads) {
+            importedPads.remove(pad)
+            voices.removeAll { it.sourcePad == pad }
+            activeLoops.remove(pad)
+            pendingLoops.remove(pad)
+        }
+        if (pads.isNotEmpty()) onLoopsChanged?.invoke(activeLoops.toSet())
+    }
+
     fun importedSampleName(pad: Int): String? = importedPads[pad]?.info?.name
     fun importedSampleInfo(pad: Int): SampleInfo? = importedPads[pad]?.info
     fun importedAssignment(pad: Int): PadSample? = importedPads[pad]?.assignment

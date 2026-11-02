@@ -271,7 +271,7 @@ class MainActivity : ComponentActivity() {
         onSampleOriginalBpm = { bpmValue ->
             val info = engine.importedSampleInfo(selectedPad)
             if (info != null) {
-                val updated = info.copy(originalBpm = bpmValue)
+                val updated = info.copy(originalBpm = bpmValue.coerceIn(30f, 260f))
                 engine.updateImportedSampleInfo(info.id, updated)
                 sampleList = sampleList.map { if (it.id == info.id) updated else it }
                 SampleStore.updateSampleInfo(this, updated)
@@ -310,6 +310,20 @@ class MainActivity : ComponentActivity() {
             sampleVersion++
         },
         onProjectSettingsToggle = { showProjectSettings = !showProjectSettings },
+        onDeleteSample = { name ->
+            val info = sampleList.firstOrNull { it.name == name }
+            if (info != null) {
+                engine.clearImportedSamplesById(info.id)
+                SampleStore.deleteSample(this, info)
+                sampleList = sampleList.filter { it.id != info.id }
+                activeLoops = engine.activeLoopPads()
+                armedLoops = engine.armedLoopPads()
+                if (engine.importedSampleName(selectedPad) == null) {
+                    sampleTempoDetectResult = null
+                }
+                sampleVersion++
+            }
+        },
         onDefaultQuantize = { q -> defaultQuantizeBeats = q },
         onDefaultSnapToggle = { defaultSnapToTempo = !defaultSnapToTempo },
         onPadVolume = { pad, volume ->

@@ -236,6 +236,54 @@ class SampleEngineTest {
         assertNull(detected)
     }
 
+    private fun mixedLoop120(): FloatArray {
+        // Kick on beats (60 Hz bursts) + hats as high noise on eighths.
+        // A detector that follows hats would answer 240/160, not 120.
+        val sampleRate = 44100
+        val n = (4.0 * sampleRate).toInt()
+        val out = FloatArray(n)
+        val rnd = java.util.Random(7)
+        for (beat in 0 until 8) {
+            val start = (beat * 0.5 * sampleRate).toInt()
+            for (i in 0 until 2205) {
+                if (start + i >= n) break
+                val tt = i.toDouble() / sampleRate
+                out[start + i] += (kotlin.math.sin(2 * Math.PI * 60 * tt) * kotlin.math.exp(-tt * 20)).toFloat()
+            }
+        }
+        for (eighth in 0 until 16) {
+            val start = (eighth * 0.25 * sampleRate).toInt()
+            for (i in 0 until 1323) {
+                if (start + i >= n) break
+                out[start + i] += (rnd.nextFloat() * 2f - 1f) * 0.3f * kotlin.math.exp(-i / 44100.0 * 30).toFloat()
+            }
+        }
+        return out
+    }
+
+    @Test
+    fun detectBpm_kickPlusHatsStill120() {
+        val detected = SampleEngine.detectBpm(mixedLoop120(), 44100)
+        assertNotNull(detected)
+        assertTrue("detected $detected should be near 120, not a subdivision", kotlin.math.abs(detected!! - 120f) < 10f)
+    }
+
+    @Test
+    fun resample_cubicKeepsSineLevel() {
+        val input = SampleEngine.sineTone(440.0, 1.0)
+        val up = SampleEngine.resample(input, 2.0)
+        assertTrue("up length ${up.size} should be near 22050", kotlin.math.abs(up.size - 22050) < 50)
+        val peak = up.sliceArray(up.size / 4 until up.size * 3 / 4).maxOf { kotlin.math.abs(it) }
+        assertTrue("peak $peak should be near 1", peak > 0.8f && peak <= 1.2f)
+    }
+
+    @Test
+    fun timeStretch_nearOneSkipsStretch() {
+        val input = SampleEngine.sineTone(440.0, 1.0)
+        val out = SampleEngine.timeStretch(input, 1.01)
+        assertEquals(input.size, out.size)
+    }
+
     @Test
     fun parseWav_rejectsNonWav() {
         assertNull(SampleEngine.parseWav(byteArrayOf(1, 2, 3, 4)))

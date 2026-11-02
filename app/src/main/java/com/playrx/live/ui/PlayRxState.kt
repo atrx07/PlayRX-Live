@@ -91,6 +91,7 @@ data class PlayRxActions(
     val onStepToggle: (Int, Int) -> Unit = { _, _ -> },
     val onProjectKeyChange: (Int) -> Unit = {},
     val onImportSample: () -> Unit = {},
+    val onDeleteSample: (String) -> Unit = {},
     val onAssignSample: (String) -> Unit = {},
     val onSamplePlayMode: (String) -> Unit = {},
     val onSampleTranspose: (Int) -> Unit = {},

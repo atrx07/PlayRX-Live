@@ -534,9 +534,9 @@ private fun BottomPanel(state: PlayRxState, actions: PlayRxActions, modifier: Mo
                         color = TextMain,
                     )
                     Slider(
-                        value = state.sampleOriginalBpm ?: state.bpm,
+                        value = (state.sampleOriginalBpm ?: state.bpm).coerceIn(30f, 260f),
                         onValueChange = { actions.onSampleOriginalBpm(it) },
-                        valueRange = 60f..180f,
+                        valueRange = 30f..260f,
                         colors = SliderDefaults.colors(thumbColor = Color.White, activeTrackColor = AccentAmber, inactiveTrackColor = DarkTab),
                     )
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -544,6 +544,18 @@ private fun BottomPanel(state: PlayRxState, actions: PlayRxActions, modifier: Mo
                             onClick = actions.onSampleDetectTempo,
                             colors = ButtonDefaults.buttonColors(containerColor = DarkTab, contentColor = TextMain),
                         ) { Text("Detect tempo") }
+                        // One-tap octave correction: tempo detection
+                        // is inherently ambiguous for half-time /
+                        // double-time feels, so a wrong octave must
+                        // not mean dragging the slider across the range.
+                        Button(
+                            onClick = { actions.onSampleOriginalBpm((state.sampleOriginalBpm ?: state.bpm) * 2f) },
+                            colors = ButtonDefaults.buttonColors(containerColor = DarkTab, contentColor = TextMain),
+                        ) { Text("×2") }
+                        Button(
+                            onClick = { actions.onSampleOriginalBpm((state.sampleOriginalBpm ?: state.bpm) / 2f) },
+                            colors = ButtonDefaults.buttonColors(containerColor = DarkTab, contentColor = TextMain),
+                        ) { Text("÷2") }
                         if (state.sampleTempoDetectResult != null) {
                             Text(state.sampleTempoDetectResult, style = MaterialTheme.typography.bodySmall, color = TextDim, modifier = Modifier.weight(1f))
                         }
@@ -613,8 +625,19 @@ private fun BottomPanel(state: PlayRxState, actions: PlayRxActions, modifier: Mo
                             ) {
                                 Text("Assign")
                             }
+                            Button(
+                                onClick = { actions.onDeleteSample(name) },
+                                contentPadding = PaddingValues(4.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = DarkTab, contentColor = Color(0xFFFF6B6B)),
+                            ) {
+                                Text("Delete")
+                            }
                         }
                     }
+                    Text(
+                        "Delete removes a sample from PlayRX's library only — your original file on the device is untouched. Any pad using it goes back to the built-in synth.",
+                        style = MaterialTheme.typography.bodySmall, color = TextDim,
+                    )
                 }
             }
             else -> {

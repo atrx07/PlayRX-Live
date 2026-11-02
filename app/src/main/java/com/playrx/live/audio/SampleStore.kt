@@ -46,6 +46,14 @@ object SampleStore {
 
     fun sampleFile(context: Context, info: SampleInfo): File = File(dir(context), info.fileName)
 
+    /** Delete a sample from the library: its app-private file plus
+     * its manifest entry. The user's original file on their device
+     * is untouched — PlayRX only ever copied it. */
+    fun deleteSample(context: Context, info: SampleInfo) {
+        runCatching { sampleFile(context, info).delete() }
+        saveManifest(context, loadManifest(context).filter { it.id != info.id })
+    }
+
     /** Replace one manifest entry (original BPM/key edits) and persist it. */
     fun updateSampleInfo(context: Context, updated: SampleInfo) {
         saveManifest(context, loadManifest(context).map { if (it.id == updated.id) updated else it })
