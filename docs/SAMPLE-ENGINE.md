@@ -123,3 +123,27 @@ Pause also changed: the transport clock only advances while
 playing, and transport-locked (imported loop) voices freeze
 silently while paused, so they resume on the bar. One-shots
 still play out while paused.
+
+## Autodetect tempo + beat counter + project settings (2026-11-02)
+
+- **Autodetect tempo:** on import, SampleEngine.detectBpm runs
+  on the decoded frames (low-passed RMS envelope, autocorrelation
+  60..200 BPM, earliest strong peak, whole-bar snap for loops).
+  If it finds a clear tempo, that becomes the sample's original
+  BPM; if not, it falls back to the project BPM, exactly as
+  before. The EDIT panel still has the manual Original BPM
+  slider, plus a **Detect tempo** button that re-runs detection
+  on an already-assigned sample and persists the result. Manual
+  edit is never removed — detection is a starting point, not a lock.
+- **Circular beat counter:** top bar, next to the transport.
+  A ring fills through the current bar, the centre shows the
+  beat (1..4) and the bar number below it. The baseline starts
+  at Bar 1 Beat 1 when Play is tapped or the first loop starts
+  (Stop resets it to Bar 1; Pause resumes, it does not reset).
+  Driven by the engine's transport position, not by the UI clock.
+- **Project settings menu:** top-bar "Project" button opens a
+  full-screen settings menu. BPM, project key, master volume,
+  default loop start (Off/Beat/Bar) and default snap for newly
+  assigned loops live there. MIXER is now only the per-column
+  strips. Per-pad tempo/key/quantize for an already-assigned
+  sample stay in EDIT.

@@ -197,6 +197,45 @@ class SampleEngineTest {
         assertTrue("out ${out.size} should be near 88200", kotlin.math.abs(out.size - 88200) < 2000)
     }
 
+    private fun clickTrack(bpm: Float, seconds: Double, sampleRate: Int = 44100): FloatArray {
+        // Kick-like bursts (short sine with fast decay) on every beat.
+        val n = (seconds * sampleRate).toInt()
+        val out = FloatArray(n)
+        val beatFrames = (60.0 / bpm * sampleRate).toInt()
+        var beat = 0
+        while (beat * beatFrames < n) {
+            val start = beat * beatFrames
+            for (i in 0 until 2205) {
+                if (start + i >= n) break
+                val t = i.toDouble() / sampleRate
+                out[start + i] = (kotlin.math.sin(2 * Math.PI * 60 * t) * kotlin.math.exp(-t * 20)).toFloat()
+            }
+            beat++
+        }
+        return out
+    }
+
+    @Test
+    fun detectBpm_clickTrack120() {
+        val detected = SampleEngine.detectBpm(clickTrack(120f, 4.0), 44100)
+        assertNotNull(detected)
+        assertTrue("detected $detected should be near 120", kotlin.math.abs(detected!! - 120f) < 8f)
+    }
+
+    @Test
+    fun detectBpm_clickTrack100() {
+        val detected = SampleEngine.detectBpm(clickTrack(100f, 4.8), 44100)
+        assertNotNull(detected)
+        assertTrue("detected $detected should be near 100", kotlin.math.abs(detected!! - 100f) < 8f)
+    }
+
+    @Test
+    fun detectBpm_flatToneReturnsNull() {
+        // A continuous sine has no rhythm; detection must not invent a tempo.
+        val detected = SampleEngine.detectBpm(SampleEngine.sineTone(440.0, 4.0), 44100)
+        assertNull(detected)
+    }
+
     @Test
     fun parseWav_rejectsNonWav() {
         assertNull(SampleEngine.parseWav(byteArrayOf(1, 2, 3, 4)))

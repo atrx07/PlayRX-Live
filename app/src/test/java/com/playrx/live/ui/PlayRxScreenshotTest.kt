@@ -46,6 +46,9 @@ private fun playingState(): PlayRxState = PlayRxState(
     activeLoops = setOf(5, 15),
     selectedPad = 5,
     projectKeyMidi = 5,
+    transportBar = 2,
+    transportBeat = 3,
+    barProgress = 0.5f,
 )
 
 private fun drumState(): PlayRxState {
@@ -116,6 +119,10 @@ class PhonePortraitScreenshotTest {
     @Test fun loopEditMixer() {
         paparazzi.snapshot { PlayRxScreen(editMixerState(), isLandscape = false) }
     }
+
+    @Test fun projectSettings() {
+        paparazzi.snapshot { PlayRxScreen(playingState().copy(showProjectSettings = true), isLandscape = false) }
+    }
 }
 
 class PhoneLandscapeScreenshotTest {
@@ -139,6 +146,10 @@ class PhoneLandscapeScreenshotTest {
 
     @Test fun loopEditMixer() {
         paparazzi.snapshot { PlayRxScreen(editMixerState(), isLandscape = true) }
+    }
+
+    @Test fun projectSettings() {
+        paparazzi.snapshot { PlayRxScreen(playingState().copy(showProjectSettings = true), isLandscape = true) }
     }
 }
 
@@ -164,6 +175,10 @@ class TabletPortraitScreenshotTest {
     @Test fun loopEditMixer() {
         paparazzi.snapshot { PlayRxScreen(editMixerState(), isLandscape = false) }
     }
+
+    @Test fun projectSettings() {
+        paparazzi.snapshot { PlayRxScreen(playingState().copy(showProjectSettings = true), isLandscape = false) }
+    }
 }
 
 class TabletLandscapeScreenshotTest {
@@ -187,5 +202,9 @@ class TabletLandscapeScreenshotTest {
 
     @Test fun loopEditMixer() {
         paparazzi.snapshot { PlayRxScreen(editMixerState(), isLandscape = true) }
+    }
+
+    @Test fun projectSettings() {
+        paparazzi.snapshot { PlayRxScreen(playingState().copy(showProjectSettings = true), isLandscape = true) }
     }
 }

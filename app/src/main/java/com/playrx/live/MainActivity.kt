@@ -88,6 +88,13 @@ class MainActivity : ComponentActivity() {
     private var sampleList by mutableStateOf(listOf<SampleInfo>())
     private var sampleImportError by mutableStateOf<String?>(null)
     private var sampleVersion by mutableStateOf(0)
+    private var transportBar by mutableStateOf(1)
+    private var transportBeat by mutableStateOf(1)
+    private var barProgress by mutableStateOf(0f)
+    private var showProjectSettings by mutableStateOf(false)
+    private var defaultQuantizeBeats by mutableStateOf(4f)
+    private var defaultSnapToTempo by mutableStateOf(true)
+    private var sampleTempoDetectResult by mutableStateOf<String?>(null)
 
     private fun currentState(): PlayRxState {
         // Read the version counters so pad/column/step edits recompose.
@@ -105,6 +112,13 @@ class MainActivity : ComponentActivity() {
             masterVolume = masterVolume,
             delayOn = delayOn,
             currentStep = currentStep,
+            transportBar = transportBar,
+            transportBeat = transportBeat,
+            barProgress = barProgress,
+            showProjectSettings = showProjectSettings,
+            defaultQuantizeBeats = defaultQuantizeBeats,
+            defaultSnapToTempo = defaultSnapToTempo,
+            sampleTempoDetectResult = sampleTempoDetectResult,
             activeLoops = activeLoops,
             armedLoops = armedLoops,
             selectedPad = selectedPad,
@@ -157,6 +171,9 @@ class MainActivity : ComponentActivity() {
             isPlaying = false
             activeLoops = emptySet()
             armedLoops = emptySet()
+            transportBar = 1
+            transportBeat = 1
+            barProgress = 0f
             currentStep = -1
         },
         onConnectMidi = {
@@ -208,9 +225,10 @@ class MainActivity : ComponentActivity() {
             engine.assignImportedSample(
                 selectedPad,
                 decoded.frames,
-                PadSample(pad = selectedPad, sampleId = info.id, playMode = mode, quantizeBeats = if (mode == PlayMode.LOOP) 4f else 0f),
+                PadSample(pad = selectedPad, sampleId = info.id, playMode = mode, quantizeBeats = if (mode == PlayMode.LOOP) defaultQuantizeBeats else 0f, snapToTempo = defaultSnapToTempo),
                 targetInfo,
             )
+            sampleTempoDetectResult = null
             sampleVersion++
             }
         },
@@ -277,6 +295,23 @@ class MainActivity : ComponentActivity() {
                 sampleVersion++
             }
         },
+        onSampleDetectTempo = {
+            val detected = engine.detectImportedTempo(selectedPad)
+            if (detected != null) {
+                val info = engine.importedSampleInfo(selectedPad)
+                if (info != null) {
+                    sampleList = sampleList.map { if (it.id == info.id) info else it }
+                    SampleStore.updateSampleInfo(this, info)
+                }
+                sampleTempoDetectResult = "Detected ${detected.toInt()} BPM"
+            } else {
+                sampleTempoDetectResult = "No clear tempo found — set it manually."
+            }
+            sampleVersion++
+        },
+        onProjectSettingsToggle = { showProjectSettings = !showProjectSettings },
+        onDefaultQuantize = { q -> defaultQuantizeBeats = q },
+        onDefaultSnapToggle = { defaultSnapToTempo = !defaultSnapToTempo },
         onPadVolume = { pad, volume ->
             engine.setPadVolume(pad, volume)
             mixerVersion++
@@ -319,6 +354,13 @@ class MainActivity : ComponentActivity() {
         engine.masterVolume = masterVolume
         engine.onStepChanged = { step ->
             mainHandler.post { currentStep = step }
+        }
+        engine.onTransportPositionChanged = { bar, beat, progress ->
+            mainHandler.post {
+                transportBar = bar
+                transportBeat = beat
+                barProgress = progress
+            }
         }
         engine.onLoopsChanged = { loops ->
             mainHandler.post {

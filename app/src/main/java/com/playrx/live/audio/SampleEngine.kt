@@ -429,6 +429,120 @@ object SampleEngine {
         return buf
     }
 
+
+    /**
+     * Autodetect a sample's tempo (2026-11-02, user request).
+     * Returns BPM in 60..200, or null when no clear tempo exists
+     * (one-shot, pad, noise, too short). Never throws.
+     *
+     * Method, deliberately simple and loop-shaped:
+     * - Low-pass the audio (one-pole, ~200 Hz) so kick/bass — which
+     *   sit on beats — dominate over hats, which sit on eighths and
+     *   would otherwise pull the answer to double tempo.
+     * - RMS envelope, hop 512 samples. Autocorrelate the envelope
+     *   for beat lags 60..200 BPM. Take the strongest peak, then
+     *   prefer the earliest peak within 90% of it (so a 2-beat
+     *   repetition does not win over the beat itself).
+     * - Bar snap for loops: if the loop's duration is close to a
+     *   whole number of bars at a nearby BPM (4/8/16/32 beats,
+     *   within 5%), snap to that BPM. Loops are almost always whole
+     *   bars, and this corrects small autocorrelation errors.
+     * - A full-band envelope is tried too; the stronger peak wins.
+     * Analysis is capped at the first 30 seconds so a long file
+     * does not stall the import.
+     */
+    fun detectBpm(frames: FloatArray, sampleRate: Int): Float? {
+        if (frames.isEmpty() || sampleRate <= 0) return null
+        val maxFrames = sampleRate * 30
+        val data = if (frames.size > maxFrames) frames.copyOfRange(0, maxFrames) else frames
+        if (data.size < sampleRate) return null // under 1 second: no tempo to find
+        fun envelope(lowPass: Boolean): FloatArray {
+            val hop = 512
+            val win = 1024
+            val n = maxOf(1, (data.size - win) / hop + 1)
+            val env = FloatArray(n)
+            var prev = 0f
+            val alpha = if (lowPass) {
+                val rc = 1.0 / (2 * PI * 200.0)
+                val dt = 1.0 / sampleRate
+                (dt / (rc + dt)).toFloat()
+            } else 1f
+            for (h in 0 until n) {
+                var sum = 0.0
+                for (i in 0 until win) {
+                    var v = data[h * hop + i]
+                    if (lowPass) {
+                        prev += alpha * (v - prev)
+                        v = prev
+                    }
+                    sum += (v * v).toDouble()
+                }
+                env[h] = kotlin.math.sqrt(sum / win).toFloat()
+            }
+            // Remove the mean so autocorrelation measures variation, not level.
+            val mean = env.average().toFloat()
+            for (i in env.indices) env[i] -= mean
+            return env
+        }
+        fun autocorrPeak(env: FloatArray): Pair<Float, Float>? {
+            val hop = 512
+            val hopsPerSecond = sampleRate.toDouble() / hop
+            // Beat lag in hops for 60..200 BPM.
+            val lagMin = (hopsPerSecond * 60.0 / 200.0).toInt().coerceAtLeast(1)
+            val lagMax = (hopsPerSecond * 60.0 / 60.0).toInt()
+            if (env.size <= lagMax + 4) return null
+            var varSum = 0.0
+            for (v in env) varSum += (v * v).toDouble()
+            if (varSum <= 0.0) return null
+            val ac = DoubleArray(lagMax + 1)
+            for (lag in lagMin..lagMax) {
+                var s = 0.0
+                for (i in 0 until env.size - lag) {
+                    s += env[i].toDouble() * env[i + lag].toDouble()
+                }
+                ac[lag] = s / varSum
+            }
+            var maxVal = 0.0
+            for (lag in lagMin..lagMax) if (ac[lag] > maxVal) maxVal = ac[lag]
+            if (maxVal < 0.25) return null // no clear periodic rhythm
+            // Earliest lag within 90% of the max: beat, not its multiple.
+            var bestLag = lagMin
+            for (lag in lagMin..lagMax) {
+                if (ac[lag] >= maxVal * 0.9) { bestLag = lag; break }
+            }
+            // Parabolic refinement around the peak.
+            var refined = bestLag.toDouble()
+            if (bestLag > lagMin && bestLag < lagMax) {
+                val a = ac[bestLag - 1]; val b = ac[bestLag]; val c = ac[bestLag + 1]
+                val denom = a - 2 * b + c
+                if (denom != 0.0) refined += 0.5 * (a - c) / denom
+            }
+            val bpm = (60.0 * hopsPerSecond / refined).toFloat()
+            if (bpm < 60f || bpm > 200f) return null
+            return bpm to maxVal.toFloat()
+        }
+        val low = autocorrPeak(envelope(lowPass = true))
+        val full = autocorrPeak(envelope(lowPass = false))
+        val (bpm, _) = when {
+            low != null && full != null -> if (low.second >= full.second) low else full
+            low != null -> low
+            full != null -> full
+            else -> return null
+        }
+        // Bar snap: loops are whole bars. If a whole-bar BPM is
+        // within 5% of the detected BPM, it is the better answer.
+        val durationSec = data.size.toDouble() / sampleRate
+        var snapped = bpm
+        var bestErr = 0.05
+        for (beats in listOf(4, 8, 16, 32, 64)) {
+            val candidate = (beats * 60.0 / durationSec).toFloat()
+            if (candidate < 60f || candidate > 200f) continue
+            val err = kotlin.math.abs(candidate - bpm) / bpm
+            if (err < bestErr) { bestErr = err; snapped = candidate }
+        }
+        return snapped
+    }
+
     // ---- WAV parsing (PCM 16/24/32 + float32, RIFF, mono-mixed) ----
 
     data class WavData(val sampleRate: Int, val channels: Int, val frames: FloatArray)

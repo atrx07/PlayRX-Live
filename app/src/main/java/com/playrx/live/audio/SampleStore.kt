@@ -74,23 +74,29 @@ object SampleStore {
         outFile.writeBytes(bytes)
 
         val wav = SampleEngine.parseWav(bytes)
-        val (sr, ch, frames) = if (wav != null) {
-            Triple(wav.sampleRate, wav.channels, wav.frames.size)
+        // Decoded frames + rate, from WAV or MediaCodec, for both
+        // the manifest and tempo detection below.
+        val decoded: SampleEngine.WavData? = if (wav != null) {
+            wav
         } else {
-            val decoded = SampleDecoder.decodeToPcm(context, uri) ?: run {
+            val d = SampleDecoder.decodeToPcm(context, uri) ?: run {
                 outFile.delete()
                 return null
             }
-            Triple(decoded.sampleRate, decoded.channels, decoded.frames.size)
+            SampleEngine.WavData(d.sampleRate, d.channels, d.frames)
         }
+        // Autodetect tempo on import (2026-11-02). If detection
+        // finds nothing clear, fall back to the project BPM — the
+        // user can still edit it in the EDIT panel afterwards.
+        val detectedBpm = SampleEngine.detectBpm(decoded.frames, decoded.sampleRate)
         val info = SampleInfo(
             id = fileName,
             name = displayName,
             fileName = fileName,
-            sampleRate = sr,
-            channels = ch,
-            frames = frames,
-            originalBpm = projectBpm,
+            sampleRate = decoded.sampleRate,
+            channels = decoded.channels,
+            frames = decoded.frames.size,
+            originalBpm = detectedBpm ?: projectBpm,
             originalKeyMidi = projectKeyMidi,
             category = category,
         )

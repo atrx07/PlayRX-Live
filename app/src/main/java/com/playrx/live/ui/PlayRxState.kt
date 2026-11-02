@@ -18,6 +18,15 @@ data class PlayRxState(
     val masterVolume: Float = 0.8f,
     val delayOn: Boolean = false,
     val currentStep: Int = -1,
+    /** Circular beat counter: bar (1-based), beat in bar (1..4), progress through the bar 0..1. */
+    val transportBar: Int = 1,
+    val transportBeat: Int = 1,
+    val barProgress: Float = 0f,
+    /** Project settings overlay (gear menu) open or not. */
+    val showProjectSettings: Boolean = false,
+    /** Project defaults for newly assigned loops. */
+    val defaultQuantizeBeats: Float = 4f,
+    val defaultSnapToTempo: Boolean = true,
     val activeLoops: Set<Int> = emptySet(),
     /** Loop pads tapped while playing, waiting for the next bar/beat. */
     val armedLoops: Set<Int> = emptySet(),
@@ -56,6 +65,8 @@ data class PlayRxState(
     val sampleOriginalKey: Int = 0,
     /** Quantize launch for the selected pad's sample: 0 = off, 1 = beat, 4 = bar. */
     val sampleQuantizeBeats: Float = 4f,
+    /** Result of the last Detect-tempo run, shown in EDIT. */
+    val sampleTempoDetectResult: String? = null,
     val sampleImportError: String? = null,
 )
 
@@ -89,4 +100,8 @@ data class PlayRxActions(
     val onSampleOriginalBpm: (Float) -> Unit = {},
     val onSampleOriginalKey: (Int) -> Unit = {},
     val onSampleQuantize: (Float) -> Unit = {},
+    val onSampleDetectTempo: () -> Unit = {},
+    val onProjectSettingsToggle: () -> Unit = {},
+    val onDefaultQuantize: (Float) -> Unit = {},
+    val onDefaultSnapToggle: () -> Unit = {},
 )

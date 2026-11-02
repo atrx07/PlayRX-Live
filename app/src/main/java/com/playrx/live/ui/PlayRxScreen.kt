@@ -30,7 +30,15 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.size
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -106,6 +114,9 @@ fun PlayRxScreen(
                 LandscapeContent(state, actions)
             } else {
                 PortraitContent(state, actions)
+            }
+            if (state.showProjectSettings) {
+                ProjectSettingsOverlay(state, actions)
             }
         }
     }
@@ -211,6 +222,109 @@ private fun PadGrid(
     }
 }
 
+
+@Composable
+private fun BeatCounter(state: PlayRxState, modifier: Modifier = Modifier) {
+    // Circular beat counter (2026-11-02): a ring that fills through
+    // the current bar, with the beat number in the centre and the
+    // bar number below it. The baseline starts at Bar 1 Beat 1 when
+    // Play is tapped or the first loop starts, and advances from
+    // there while the transport runs; Stop resets it to Bar 1.
+    Box(modifier = modifier.size(64.dp), contentAlignment = Alignment.Center) {
+        Canvas(modifier = Modifier.fillMaxSize()) {
+            val stroke = 4.dp.toPx()
+            drawArc(
+                color = DarkTab,
+                startAngle = -90f,
+                sweepAngle = 360f,
+                useCenter = false,
+                topLeft = Offset(stroke / 2, stroke / 2),
+                size = Size(size.width - stroke, size.height - stroke),
+                style = Stroke(width = stroke),
+            )
+            drawArc(
+                color = AccentAmber,
+                startAngle = -90f,
+                sweepAngle = (state.barProgress.coerceIn(0f, 1f) * 360f).coerceAtLeast(2f),
+                useCenter = false,
+                topLeft = Offset(stroke / 2, stroke / 2),
+                size = Size(size.width - stroke, size.height - stroke),
+                style = Stroke(width = stroke, cap = StrokeCap.Round),
+            )
+        }
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(
+                state.transportBeat.toString(),
+                color = if (state.isPlaying) TextMain else TextDim,
+                fontSize = 18.sp, fontWeight = FontWeight.Bold, maxLines = 1,
+            )
+            Text("BAR ${state.transportBar}", color = TextDim, fontSize = 8.sp, maxLines = 1, softWrap = false)
+        }
+    }
+}
+
+@Composable
+private fun ProjectSettingsOverlay(state: PlayRxState, actions: PlayRxActions) {
+    // Project settings menu (2026-11-02): everything project-wide
+    // lives here, not scattered across MIXER/FX. MIXER is now only
+    // the per-column strips; tempo, key, master volume and the
+    // defaults for newly assigned loops are here.
+    Surface(color = DarkBg, modifier = Modifier.fillMaxSize()) {
+        Column(
+            modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Project settings", style = MaterialTheme.typography.titleLarge, color = TextMain, modifier = Modifier.weight(1f))
+                Button(
+                    onClick = actions.onProjectSettingsToggle,
+                    colors = ButtonDefaults.buttonColors(containerColor = AccentAmber, contentColor = Color.Black),
+                ) { Text("Done") }
+            }
+            Text("Tempo", color = TextMain)
+            Text("BPM: ${state.bpm.toInt()}", color = TextDim)
+            Slider(
+                value = state.bpm, onValueChange = actions.onBpmChange, valueRange = 60f..180f,
+                colors = SliderDefaults.colors(thumbColor = Color.White, activeTrackColor = AccentAmber, inactiveTrackColor = DarkTab),
+            )
+            Text("Project key: ${pitchName(state.projectKeyMidi)} — melodic samples follow it, drums do not.", color = TextMain)
+            Slider(
+                value = state.projectKeyMidi.toFloat(),
+                onValueChange = { actions.onProjectKeyChange(it.toInt()) },
+                valueRange = 0f..11f, steps = 10,
+                colors = SliderDefaults.colors(thumbColor = Color.White, activeTrackColor = AccentAmber, inactiveTrackColor = DarkTab),
+            )
+            Text("Master volume: ${(state.masterVolume * 100).toInt()}%", color = TextMain)
+            Slider(
+                value = state.masterVolume, onValueChange = actions.onVolumeChange, valueRange = 0f..1f,
+                colors = SliderDefaults.colors(thumbColor = Color.White, activeTrackColor = AccentAmber, inactiveTrackColor = DarkTab),
+            )
+            Text("Default loop start for newly assigned loops", color = TextMain)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                for ((label, q) in listOf("Off" to 0f, "Beat" to 1f, "Bar" to 4f)) {
+                    val sel = state.defaultQuantizeBeats == q
+                    Button(
+                        onClick = { actions.onDefaultQuantize(q) },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (sel) AccentAmber else DarkTab,
+                            contentColor = if (sel) Color.Black else TextMain,
+                        ),
+                    ) { Text(label) }
+                }
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Snap new samples to project tempo by default", color = TextMain, modifier = Modifier.weight(1f))
+                Switch(checked = state.defaultSnapToTempo, onCheckedChange = { actions.onDefaultSnapToggle() })
+            }
+            Text(
+                "Per-pad tempo/key/quantize for a sample already assigned are still in EDIT. " +
+                    "These project settings are the defaults a new assignment starts from.",
+                style = MaterialTheme.typography.bodySmall, color = TextDim,
+            )
+        }
+    }
+}
+
 @Composable
 private fun TopTabs(state: PlayRxState, actions: PlayRxActions) {
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -302,20 +416,6 @@ private fun TransportButtons(state: PlayRxState, actions: PlayRxActions) {
             Text("Connect MIDI")
         }
     }
-}
-
-@Composable
-private fun TempoControls(state: PlayRxState, actions: PlayRxActions) {
-    Text("BPM: ${state.bpm.toInt()}", color = TextMain)
-    Slider(
-        value = state.bpm, onValueChange = actions.onBpmChange, valueRange = 60f..180f,
-        colors = SliderDefaults.colors(thumbColor = Color.White, activeTrackColor = AccentAmber, inactiveTrackColor = DarkTab),
-    )
-    Text("Master volume: ${(state.masterVolume * 100).toInt()}%", color = TextMain)
-    Slider(
-        value = state.masterVolume, onValueChange = actions.onVolumeChange, valueRange = 0f..1f,
-        colors = SliderDefaults.colors(thumbColor = Color.White, activeTrackColor = AccentAmber, inactiveTrackColor = DarkTab),
-    )
 }
 
 @Composable
@@ -439,6 +539,15 @@ private fun BottomPanel(state: PlayRxState, actions: PlayRxActions, modifier: Mo
                         valueRange = 60f..180f,
                         colors = SliderDefaults.colors(thumbColor = Color.White, activeTrackColor = AccentAmber, inactiveTrackColor = DarkTab),
                     )
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(
+                            onClick = actions.onSampleDetectTempo,
+                            colors = ButtonDefaults.buttonColors(containerColor = DarkTab, contentColor = TextMain),
+                        ) { Text("Detect tempo") }
+                        if (state.sampleTempoDetectResult != null) {
+                            Text(state.sampleTempoDetectResult, style = MaterialTheme.typography.bodySmall, color = TextDim, modifier = Modifier.weight(1f))
+                        }
+                    }
                     Text("Original key: ${pitchName(state.sampleOriginalKey)} — melodic samples transpose from here to the project key.", color = TextMain)
                     Slider(
                         value = state.sampleOriginalKey.toFloat(),
@@ -509,15 +618,10 @@ private fun BottomPanel(state: PlayRxState, actions: PlayRxActions, modifier: Mo
                 }
             }
             else -> {
+                // MIXER is now only the per-column strips (2026-11-02).
+                // Tempo, project key and master volume moved to the
+                // Project settings menu (top bar), not here.
                 Text("Mixer — VOLUMES", style = MaterialTheme.typography.bodySmall, color = TextDim)
-                TempoControls(state, actions)
-                Text("Project key: ${pitchName(state.projectKeyMidi)} — melodic samples follow it, drums do not.", color = TextMain)
-                Slider(
-                    value = state.projectKeyMidi.toFloat(),
-                    onValueChange = { actions.onProjectKeyChange(it.toInt()) },
-                    valueRange = 0f..11f, steps = 10,
-                    colors = SliderDefaults.colors(thumbColor = Color.White, activeTrackColor = AccentAmber, inactiveTrackColor = DarkTab),
-                )
                 ColumnMixer(state, actions)
             }
         }
@@ -626,7 +730,13 @@ private fun PortraitContent(state: PlayRxState, actions: PlayRxActions) {
         Text("PlayRX Live", style = MaterialTheme.typography.headlineMedium, color = TextMain)
         Text(state.midiStatus, style = MaterialTheme.typography.bodySmall, color = TextDim)
         Text("Chord: ${state.chordText}", style = MaterialTheme.typography.titleMedium, color = TextMain)
-        Row(modifier = Modifier.padding(vertical = 8.dp)) {
+        Row(modifier = Modifier.padding(vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            BeatCounter(state)
+            Button(
+                onClick = actions.onProjectSettingsToggle,
+                shape = RoundedCornerShape(20.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = DarkTab, contentColor = TextMain),
+            ) { Text("Project") }
             TransportButtons(state, actions)
         }
         TopTabs(state, actions)
@@ -661,6 +771,12 @@ private fun LandscapeContent(state: PlayRxState, actions: PlayRxActions) {
                 Text(state.midiStatus, style = MaterialTheme.typography.bodySmall, color = TextDim)
                 Text("Chord: ${state.chordText}", style = MaterialTheme.typography.titleSmall, color = TextMain)
             }
+            BeatCounter(state)
+            Button(
+                onClick = actions.onProjectSettingsToggle,
+                shape = RoundedCornerShape(20.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = DarkTab, contentColor = TextMain),
+            ) { Text("Project") }
             TransportButtons(state, actions)
         }
         TopTabs(state, actions)

@@ -253,6 +253,8 @@ class PlaybackEngine {
     var delayEnabled: Boolean = false
 
     var onStepChanged: ((Int) -> Unit)? = null
+    /** Bar (1-based), beat in bar (1..4), progress through the bar 0..1. */
+    var onTransportPositionChanged: ((Int, Int, Float) -> Unit)? = null
     var onLoopsChanged: ((Set<Int>) -> Unit)? = null
 
     // Sequencer: any pad -> 16 steps (UI edits drum pads)
@@ -307,6 +309,17 @@ class PlaybackEngine {
             assignment = assignment,
             rendered = SampleEngine.renderPadSample(cur.raw, assignment, cur.info, bpm, projectKeyMidi),
         )
+    }
+
+    /** Re-detect the tempo of the sample on [pad] from its raw
+     * frames. Returns the detected BPM, or null if no clear tempo.
+     * On success the info (and every pad using that sample) is
+     * updated and re-rendered, like a manual BPM edit. */
+    fun detectImportedTempo(pad: Int): Float? {
+        val cur = importedPads[pad] ?: return null
+        val detected = SampleEngine.detectBpm(cur.raw, cur.info.sampleRate) ?: return null
+        updateImportedSampleInfo(cur.info.id, cur.info.copy(originalBpm = detected))
+        return detected
     }
 
     /** Replace a sample's info (original BPM/key edit) and re-render
@@ -469,6 +482,8 @@ class PlaybackEngine {
         onLoopsChanged?.invoke(emptySet())
         isPlaying = false
         lastStep = -1
+        totalBeats = 0.0
+        onTransportPositionChanged?.invoke(1, 1, 0f)
     }
 
     /** Tap a pad. One-shots fire immediately; loop pads toggle.
@@ -582,6 +597,14 @@ class PlaybackEngine {
                 if (step != lastStep) {
                     lastStep = step
                     onStepChanged?.invoke(step)
+                    // Circular beat counter (2026-11-02): the baseline
+                    // starts at Bar 1 Beat 1 when Play is tapped or
+                    // the first loop starts (totalBeats = 0 after
+                    // Stop), and advances from there while playing.
+                    val bar = (totalBeats / 4).toInt() + 1
+                    val beatInBar = (totalBeats % 4).toInt() + 1
+                    val progress = ((totalBeats % 4) / 4).toFloat()
+                    onTransportPositionChanged?.invoke(bar, beatInBar, progress)
                     for (trk in 0 until SampleBank.PAD_COUNT) {
                         if (pattern[trk][step]) triggerSample(trk, 0.9f, trk)
                     }
