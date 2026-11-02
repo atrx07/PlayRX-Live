@@ -161,6 +161,43 @@ class SampleEngineTest {
     }
 
     @Test
+    fun timeStretch_normalizedLevelStaysFlat() {
+        // Without window-sum normalization, a 2x stretch throbs and
+        // peaks well above 1. With it, a sine stays near its level.
+        val input = SampleEngine.sineTone(440.0, 1.0)
+        val stretched = SampleEngine.timeStretch(input, 2.0)
+        val middle = stretched.sliceArray(stretched.size / 4 until stretched.size * 3 / 4)
+        val peak = middle.maxOf { kotlin.math.abs(it) }
+        assertTrue("peak $peak should be <= 1.2", peak <= 1.2f)
+        assertTrue("peak $peak should be >= 0.7", peak >= 0.7f)
+    }
+
+    @Test
+    fun render_converts48kTo44100() {
+        // A 1-second 48 kHz file must come out as ~44100 frames,
+        // not 48000 frames played slow at 44100 Hz.
+        val input = SampleEngine.sineTone(440.0, 1.0, 48000)
+        val out = SampleEngine.renderPadSample(
+            input, assignment().copy(snapToTempo = false),
+            info().copy(sampleRate = 48000, frames = 48000), 120f, 0
+        )
+        assertTrue("out ${out.size} should be near 44100", kotlin.math.abs(out.size - 44100) < 100)
+    }
+
+    @Test
+    fun render_loopSnapsLengthToWholeBar() {
+        // 1 second at 120 BPM is 2 beats = half a bar; a LOOP pad
+        // must stretch to exactly 1 bar (88200 frames at 44100 Hz)
+        // so every repeat lands on a bar.
+        val input = SampleEngine.sineTone(440.0, 1.0)
+        val out = SampleEngine.renderPadSample(
+            input, assignment().copy(playMode = PlayMode.LOOP, snapToTempo = false),
+            info(), 120f, 0
+        )
+        assertTrue("out ${out.size} should be near 88200", kotlin.math.abs(out.size - 88200) < 2000)
+    }
+
+    @Test
     fun parseWav_rejectsNonWav() {
         assertNull(SampleEngine.parseWav(byteArrayOf(1, 2, 3, 4)))
         assertNull(SampleEngine.parseWav("not a wav file at all, far too short".toByteArray()))

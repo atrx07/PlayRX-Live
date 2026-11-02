@@ -258,6 +258,14 @@ class PlaybackEngine {
     // Sequencer: any pad -> 16 steps (UI edits drum pads)
     private val pattern = Array(SampleBank.PAD_COUNT) { BooleanArray(16) }
     private val activeLoops = mutableSetOf<Int>()
+    // Loop pads tapped while the transport is running, waiting for
+    // their quantize boundary (default: next bar). They are NOT in
+    // activeLoops until the boundary, so they make no sound before
+    // it — the whole point of bar sync is that a tap mid-bar must
+    // not start a loop mid-bar.
+    private val pendingLoops = mutableMapOf<Int, Double>()
+    fun armedLoopPads(): Set<Int> = pendingLoops.keys.toSet()
+    fun armedLoopPadsWithBeat(): Map<Int, Double> = pendingLoops.toMap()
 
     // Imported samples (SampleEngine, 2026-11-01): per pad, the raw
     // decoded frames + assignment + info, and the rendered buffer
@@ -299,6 +307,19 @@ class PlaybackEngine {
             assignment = assignment,
             rendered = SampleEngine.renderPadSample(cur.raw, assignment, cur.info, bpm, projectKeyMidi),
         )
+    }
+
+    /** Replace a sample's info (original BPM/key edit) and re-render
+     * every pad that uses that sample. */
+    fun updateImportedSampleInfo(sampleId: String, info: SampleInfo) {
+        for ((pad, cur) in importedPads) {
+            if (cur.info.id == sampleId) {
+                importedPads[pad] = cur.copy(
+                    info = info,
+                    rendered = SampleEngine.renderPadSample(cur.raw, cur.assignment, info, bpm, projectKeyMidi),
+                )
+            }
+        }
     }
 
     /** Re-render every imported pad at the current BPM / project key. */
@@ -374,7 +395,7 @@ class PlaybackEngine {
 
     fun activeLoopPads(): Set<Int> = activeLoops.toSet()
 
-    private data class Voice(val sample: FloatArray, var pos: Int, val volume: Float, val sourcePad: Int = -1)
+    private data class Voice(val sample: FloatArray, var pos: Int, val volume: Float, val sourcePad: Int = -1, val transportLocked: Boolean = false)
 
     private val pending = java.util.concurrent.ConcurrentLinkedQueue<Voice>()
     private val voices = mutableListOf<Voice>()
@@ -433,6 +454,7 @@ class PlaybackEngine {
         track = null
         voices.clear()
         activeLoops.clear()
+        pendingLoops.clear()
     }
 
     fun setPlaying(playing: Boolean) {
@@ -443,12 +465,24 @@ class PlaybackEngine {
     fun stopAll() {
         voices.clear()
         activeLoops.clear()
+        pendingLoops.clear()
         onLoopsChanged?.invoke(emptySet())
         isPlaying = false
         lastStep = -1
     }
 
-    /** Tap a pad. One-shots fire immediately; loop pads toggle. */
+    /** Tap a pad. One-shots fire immediately; loop pads toggle.
+     *
+     * Bar sync (2026-11-02, the live-performance fix): a loop pad
+     * tapped while the transport is running does NOT start at the
+     * tap. It is armed and starts at its next quantize boundary —
+     * Bar (4 beats) by default for LOOP pads, Beat (1) if the pad's
+     * quantize is set to a beat, immediate if quantize is Off.
+     * A tap while the transport is stopped starts immediately and
+     * starts the transport (there is no bar to sync to yet).
+     * Tapping an armed pad again cancels the arm; tapping a playing
+     * loop stops it immediately (stop is not quantized).
+     */
     fun triggerPad(pad: Int) {
         val imported = importedSampleFor(pad)
         val assignment = importedPads[pad]?.assignment
@@ -461,23 +495,34 @@ class PlaybackEngine {
             else -> SampleBank.isLoopPad(pad)
         }
         if (isLooping) {
-            if (activeLoops.contains(pad)) {
+            if (pendingLoops.containsKey(pad)) {
+                // Cancel the arm — no sound ever started.
+                pendingLoops.remove(pad)
+                onLoopsChanged?.invoke(activeLoops.toSet())
+            } else if (activeLoops.contains(pad)) {
                 activeLoops.remove(pad)
                 // Stop any still-playing voice of this loop pad.
                 voices.removeAll { it.sourcePad == pad }
+                onLoopsChanged?.invoke(activeLoops.toSet())
             } else {
-                activeLoops.add(pad)
-                if (!isPlaying) isPlaying = true
-                // Loop pads with imported samples are re-triggered by
-                // the transport clock (see mixLoop); synth loop pads
-                // use their 16-step pattern there. Imported loops
-                // play as a whole buffer, looped by the voice below.
-                if (imported != null) {
-                    val vol = effectiveVolume(pad, 1f)
-                    if (vol > 0f) pending.add(Voice(imported, 0, vol, pad))
+                val quantize = assignment?.quantizeBeats ?: 4f
+                if (!isPlaying || quantize <= 0f) {
+                    startLoopPad(pad, imported)
+                } else {
+                    // Next boundary strictly after now: if the tap
+                    // lands exactly on a bar, start at once; otherwise
+                    // wait. totalBeats only advances while playing,
+                    // so the boundary is stable while paused.
+                    val q = quantize.toDouble()
+                    val boundary = kotlin.math.ceil(totalBeats / q) * q
+                    if (boundary <= totalBeats + 1e-6) {
+                        startLoopPad(pad, imported)
+                    } else {
+                        pendingLoops[pad] = boundary
+                        onLoopsChanged?.invoke(activeLoops.toSet())
+                    }
                 }
             }
-            onLoopsChanged?.invoke(activeLoops.toSet())
         } else {
             val vol = effectiveVolume(pad, 1f)
             if (vol > 0f) {
@@ -485,6 +530,19 @@ class PlaybackEngine {
                 else pending.add(Voice(sample(pad), 0, vol, pad))
             }
         }
+    }
+
+    private fun startLoopPad(pad: Int, imported: FloatArray?) {
+        activeLoops.add(pad)
+        if (!isPlaying) isPlaying = true
+        // Loop pads with imported samples are voiced by the mixer;
+        // synth loop pads use their 16-step pattern there. Imported
+        // loops play as a whole buffer, looped by the voice below.
+        if (imported != null) {
+            val vol = effectiveVolume(pad, 1f)
+            if (vol > 0f) pending.add(Voice(imported, 0, vol, pad, transportLocked = true))
+        }
+        onLoopsChanged?.invoke(activeLoops.toSet())
     }
 
     private fun triggerSample(index: Int, volume: Float = 0.9f, sourcePad: Int = -1) {
@@ -508,9 +566,18 @@ class PlaybackEngine {
             }
 
             // Advance the transport clock and fire step events.
-            val beatsBefore = totalBeats
-            totalBeats += blockFrames.toDouble() / SampleBank.SAMPLE_RATE * (bpm / 60.0)
+            // The clock ONLY advances while playing: pausing used to
+            // keep totalBeats running, so a bar boundary computed
+            // while paused was already in the past on resume, and
+            // imported loops kept looping out of phase with the bar.
             if (isPlaying) {
+                totalBeats += blockFrames.toDouble() / SampleBank.SAMPLE_RATE * (bpm / 60.0)
+                // Fire any armed loops whose boundary this block crossed.
+                val due = pendingLoops.filter { it.value <= totalBeats + 1e-9 }.keys.toList()
+                for (pad in due) {
+                    pendingLoops.remove(pad)
+                    startLoopPad(pad, importedSampleFor(pad))
+                }
                 val step = ((totalBeats * 4).toInt() % 16 + 16) % 16
                 if (step != lastStep) {
                     lastStep = step
@@ -531,9 +598,6 @@ class PlaybackEngine {
                     }
                 }
             }
-            @Suppress("UNUSED_VARIABLE")
-            val ignored = beatsBefore
-
             // Delay time: dotted eighth at current BPM.
             val delaySamples = ((60.0 / bpm * 0.75) * SampleBank.SAMPLE_RATE).toInt()
                 .coerceIn(1, delayBuf.size - 1)
@@ -544,6 +608,12 @@ class PlaybackEngine {
                 val iter = voices.iterator()
                 while (iter.hasNext()) {
                     val v = iter.next()
+                    // Transport-locked (imported loop) voices freeze
+                    // while paused: they make no sound and do not
+                    // advance, so they resume exactly on the bar
+                    // instead of looping out of phase under a pause.
+                    // One-shot voices still play out while paused.
+                    if (!isPlaying && v.transportLocked) continue
                     if (v.pos >= v.sample.size) {
                         // Imported loop voices loop until the pad is
                         // toggled off; synth voices end at the buffer.
@@ -568,7 +638,10 @@ class PlaybackEngine {
                     // Keep delayPos within the active delay window.
                     if (delayPos >= delaySamples) delayPos = 0
                 }
-                val clamped = dry.coerceIn(-1f, 1f)
+                // Soft clip (tanh) instead of a hard clamp: several
+                // loops + one-shots summing past 1.0 used to square
+                // off into harsh distortion. tanh rounds the top off.
+                val clamped = kotlin.math.tanh(dry.toDouble()).toFloat()
                 val shortVal = (clamped * 32767).toInt().toShort()
                 outShorts[frame * 2] = shortVal
                 outShorts[frame * 2 + 1] = shortVal

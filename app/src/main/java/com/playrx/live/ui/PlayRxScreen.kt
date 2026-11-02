@@ -128,6 +128,7 @@ private fun columnColor(col: Int): Color = when (col) {
 @Composable
 private fun PadButton(state: PlayRxState, actions: PlayRxActions, pad: Int, modifier: Modifier = Modifier) {
     val isActiveLoop = state.activeLoops.contains(pad)
+    val isArmed = state.armedLoops.contains(pad)
     val isSelected = state.selectedPad == pad
     val col = columnColor(SampleBank.columnOf(pad))
     // Remixlive pad read, dark version:
@@ -139,12 +140,17 @@ private fun PadButton(state: PlayRxState, actions: PlayRxActions, pad: Int, modi
     // loop teal, which hid the pad's own column colour entirely.
     val container = when {
         isActiveLoop -> col
+        isArmed -> col.copy(alpha = 0.35f)
         isSelected -> col.copy(alpha = 0.35f)
         else -> col.copy(alpha = 0.22f)
     }
     val border = when {
         isActiveLoop && isSelected -> BorderStroke(3.dp, Color.Black)
         isActiveLoop -> BorderStroke(1.dp, Color.Black.copy(alpha = 0.35f))
+        // Armed (waiting for the next bar) reads as a white ring:
+        // it is NOT playing yet, so it must not use the filled
+        // playing colour, and it must not look merely selected.
+        isArmed -> BorderStroke(2.dp, Color.White)
         isSelected -> BorderStroke(2.dp, col)
         else -> BorderStroke(1.dp, col.copy(alpha = 0.45f))
     }
@@ -421,6 +427,38 @@ private fun BottomPanel(state: PlayRxState, actions: PlayRxActions, modifier: Mo
                             contentColor = if (rev) Color.Black else TextMain,
                         ),
                     ) { Text(if (rev) "Reverse: On" else "Reverse") }
+                }
+                if (state.selectedPadSampleName != null) {
+                    Text(
+                        "Original BPM: ${state.sampleOriginalBpm?.toInt() ?: 0} — set this to the loop's real BPM and Snap stretches it to the project BPM. If it is left at the project BPM, Snap has nothing to stretch.",
+                        color = TextMain,
+                    )
+                    Slider(
+                        value = state.sampleOriginalBpm ?: state.bpm,
+                        onValueChange = { actions.onSampleOriginalBpm(it) },
+                        valueRange = 60f..180f,
+                        colors = SliderDefaults.colors(thumbColor = Color.White, activeTrackColor = AccentAmber, inactiveTrackColor = DarkTab),
+                    )
+                    Text("Original key: ${pitchName(state.sampleOriginalKey)} — melodic samples transpose from here to the project key.", color = TextMain)
+                    Slider(
+                        value = state.sampleOriginalKey.toFloat(),
+                        onValueChange = { actions.onSampleOriginalKey(it.toInt()) },
+                        valueRange = 0f..11f, steps = 10,
+                        colors = SliderDefaults.colors(thumbColor = Color.White, activeTrackColor = AccentAmber, inactiveTrackColor = DarkTab),
+                    )
+                    Text("Loop start: ${if (state.sampleQuantizeBeats == 0f) "Immediate" else if (state.sampleQuantizeBeats == 1f) "Next beat" else "Next bar"} — a loop tapped mid-bar waits for this boundary, so you never have to time the tap.", color = TextMain)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        for ((label, q) in listOf("Off" to 0f, "Beat" to 1f, "Bar" to 4f)) {
+                            val sel = state.sampleQuantizeBeats == q
+                            Button(
+                                onClick = { actions.onSampleQuantize(q) },
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = if (sel) AccentAmber else DarkTab,
+                                    contentColor = if (sel) Color.Black else TextMain,
+                                ),
+                            ) { Text(label) }
+                        }
+                    }
                 }
                 Text(
                     "Snap = tempo-stretch to project BPM, pitch kept. " +

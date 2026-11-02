@@ -77,6 +77,7 @@ class MainActivity : ComponentActivity() {
     private var delayOn by mutableStateOf(false)
     private var currentStep by mutableStateOf(-1)
     private var activeLoops by mutableStateOf(setOf<Int>())
+    private var armedLoops by mutableStateOf(setOf<Int>())
     private var selectedPad by mutableStateOf(0)
     private var editPattern by mutableStateOf(false)
     private var patternVersion by mutableStateOf(0)
@@ -105,6 +106,7 @@ class MainActivity : ComponentActivity() {
             delayOn = delayOn,
             currentStep = currentStep,
             activeLoops = activeLoops,
+            armedLoops = armedLoops,
             selectedPad = selectedPad,
             editPattern = editPattern,
             selectedTab = selectedTab,
@@ -117,6 +119,9 @@ class MainActivity : ComponentActivity() {
             sampleSnapToTempo = engine.importedAssignment(selectedPad)?.snapToTempo ?: true,
             sampleCutToGrid = engine.importedAssignment(selectedPad)?.cutToGrid ?: false,
             sampleReverse = engine.importedAssignment(selectedPad)?.reverse ?: false,
+            sampleOriginalBpm = engine.importedSampleInfo(selectedPad)?.originalBpm,
+            sampleOriginalKey = engine.importedSampleInfo(selectedPad)?.originalKeyMidi?.let { ((it % 12) + 12) % 12 } ?: projectKeyMidi,
+            sampleQuantizeBeats = engine.importedAssignment(selectedPad)?.quantizeBeats ?: 4f,
             sampleImportError = sampleImportError,
             padVolumes = List(SampleBank.PAD_COUNT) { engine.getPadVolume(it) },
             padMuted = List(SampleBank.PAD_COUNT) { engine.isPadMuted(it) },
@@ -137,10 +142,9 @@ class MainActivity : ComponentActivity() {
             } else {
                 engine.triggerPad(pad)
                 selectedPad = pad
-                if (SampleBank.isLoopPad(pad)) {
-                    activeLoops = engine.activeLoopPads()
-                    isPlaying = engine.isPlaying
-                }
+                activeLoops = engine.activeLoopPads()
+                armedLoops = engine.armedLoopPads()
+                isPlaying = engine.isPlaying
             }
         },
         onPlayToggle = {
@@ -152,6 +156,7 @@ class MainActivity : ComponentActivity() {
             engine.stopAll()
             isPlaying = false
             activeLoops = emptySet()
+            armedLoops = emptySet()
             currentStep = -1
         },
         onConnectMidi = {
@@ -203,7 +208,7 @@ class MainActivity : ComponentActivity() {
             engine.assignImportedSample(
                 selectedPad,
                 decoded.frames,
-                PadSample(pad = selectedPad, sampleId = info.id, playMode = mode),
+                PadSample(pad = selectedPad, sampleId = info.id, playMode = mode, quantizeBeats = if (mode == PlayMode.LOOP) 4f else 0f),
                 targetInfo,
             )
             sampleVersion++
@@ -242,6 +247,33 @@ class MainActivity : ComponentActivity() {
             val cur = engine.importedAssignment(selectedPad)
             if (cur != null) {
                 engine.updateImportedAssignment(selectedPad, cur.copy(reverse = !cur.reverse))
+                sampleVersion++
+            }
+        },
+        onSampleOriginalBpm = { bpmValue ->
+            val info = engine.importedSampleInfo(selectedPad)
+            if (info != null) {
+                val updated = info.copy(originalBpm = bpmValue)
+                engine.updateImportedSampleInfo(info.id, updated)
+                sampleList = sampleList.map { if (it.id == info.id) updated else it }
+                SampleStore.updateSampleInfo(this, updated)
+                sampleVersion++
+            }
+        },
+        onSampleOriginalKey = { key ->
+            val info = engine.importedSampleInfo(selectedPad)
+            if (info != null) {
+                val updated = info.copy(originalKeyMidi = key)
+                engine.updateImportedSampleInfo(info.id, updated)
+                sampleList = sampleList.map { if (it.id == info.id) updated else it }
+                SampleStore.updateSampleInfo(this, updated)
+                sampleVersion++
+            }
+        },
+        onSampleQuantize = { q ->
+            val cur = engine.importedAssignment(selectedPad)
+            if (cur != null) {
+                engine.updateImportedAssignment(selectedPad, cur.copy(quantizeBeats = q))
                 sampleVersion++
             }
         },
@@ -291,6 +323,7 @@ class MainActivity : ComponentActivity() {
         engine.onLoopsChanged = { loops ->
             mainHandler.post {
                 activeLoops = loops
+                armedLoops = engine.armedLoopPads()
                 isPlaying = engine.isPlaying
             }
         }

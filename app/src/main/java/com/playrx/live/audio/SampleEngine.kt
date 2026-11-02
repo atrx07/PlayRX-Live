@@ -232,6 +232,13 @@ object SampleEngine {
         val hopS = (hopA / rate).toInt().coerceAtLeast(1)
         val outLen = (input.size / rate).toInt().coerceAtLeast(grain)
         val out = FloatArray(outLen + grain)
+        // Window-sum normalization: with hopS != 512 the overlapping
+        // Hann windows no longer sum to 1, so without this the
+        // output throbs (amplitude modulation) and clips in places.
+        // Dividing by the accumulated window sum restores a flat
+        // level — this was the main audible "trash" in tempo-stretched
+        // loops, not the stretch itself.
+        val winSum = FloatArray(outLen + grain)
         val window = FloatArray(grain) { i ->
             (0.5 * (1 - kotlin.math.cos(2 * PI * i / (grain - 1)))).toFloat()
         }
@@ -240,9 +247,14 @@ object SampleEngine {
         while (readPos + grain <= input.size && writePos + grain <= out.size) {
             for (i in 0 until grain) {
                 out[writePos + i] += input[readPos + i] * window[i]
+                winSum[writePos + i] += window[i]
             }
             readPos += hopA
             writePos += hopS
+        }
+        for (i in 0 until outLen) {
+            val s = winSum[i]
+            out[i] = if (s > 0.01f) out[i] / s else 0f
         }
         return out.copyOf(outLen)
     }
@@ -270,6 +282,28 @@ object SampleEngine {
      * mixer can re-render on BPM or project-key change without
      * re-reading the file.
      */
+    /** Output rate of the mixer. Rendered buffers are always this rate. */
+    const val OUTPUT_SAMPLE_RATE = 44100
+
+    /**
+     * Full render for one pad assignment: rate-convert to the mixer
+     * rate, slice, cut-to-grid, reverse, fades, pitch-shift,
+     * tempo-stretch, bar-length snap (LOOP only), filter, gain.
+     * Pure, so the mixer can re-render on BPM or project-key change
+     * without re-reading the file.
+     *
+     * Order matters, and two of these were the tempo bugs reported
+     * 2026-11-02:
+     * - Rate conversion FIRST: a 48 kHz file played at 44.1 kHz
+     *   without conversion sounds ~8% slow and flat, and its tempo
+     *   never matches the project. Converted buffers are always
+     *   44100 Hz, so grid/bar math below is in output frames.
+     * - Bar-length snap for LOOP pads: after tempo stretch, the
+     *   buffer is stretched again to the nearest whole number of
+     *   bars at the project BPM (min 1 bar). Without it a loop
+     *   whose length is not a bar multiple drifts a little further
+     *   out of phase on every repeat, even if it starts on a bar.
+     */
     fun renderPadSample(
         input: FloatArray,
         assignment: PadSample,
@@ -278,16 +312,24 @@ object SampleEngine {
         projectKeyMidi: Int?,
     ): FloatArray {
         if (input.isEmpty()) return FloatArray(0)
-        var start = if (assignment.startFrame >= 0) assignment.startFrame else 0
-        var end = if (assignment.endFrame >= 0) assignment.endFrame else input.size
-        start = start.coerceIn(0, input.size)
-        end = end.coerceIn(start, input.size)
-        if (assignment.cutToGrid) {
-            val (s, e) = cutToGrid(start, end, info.sampleRate, projectBpm, assignment.gridDivisionBeats)
-            start = s.coerceIn(0, input.size)
-            end = e.coerceIn(start, input.size)
+        val outRate = OUTPUT_SAMPLE_RATE
+        // Convert the whole file to the mixer rate, then scale the
+        // slice bounds into output frames. At 44100 Hz this is a no-op.
+        var buf = input
+        if (info.sampleRate > 0 && info.sampleRate != outRate) {
+            buf = resample(input, info.sampleRate.toDouble() / outRate)
         }
-        var buf = input.copyOfRange(start, end)
+        val scale = if (info.sampleRate > 0) outRate.toDouble() / info.sampleRate else 1.0
+        var start = if (assignment.startFrame >= 0) (assignment.startFrame * scale).toInt() else 0
+        var end = if (assignment.endFrame >= 0) (assignment.endFrame * scale).toInt() else buf.size
+        start = start.coerceIn(0, buf.size)
+        end = end.coerceIn(start, buf.size)
+        if (assignment.cutToGrid) {
+            val (s, e) = cutToGrid(start, end, outRate, projectBpm, assignment.gridDivisionBeats)
+            start = s.coerceIn(0, buf.size)
+            end = e.coerceIn(start, buf.size)
+        }
+        buf = buf.copyOfRange(start, end)
         if (assignment.reverse) buf = buf.reversedArray()
         // Linear fades, clamped so they never overlap into silence.
         if (assignment.fadeInFrames > 0) {
@@ -307,7 +349,26 @@ object SampleEngine {
             val rate = tempoRate(projectBpm, info.originalBpm)
             if (rate != 1.0) buf = timeStretch(buf, rate)
         }
-        buf = lowPass(buf, assignment.filterCutoffHz, info.sampleRate)
+        // LOOP pads repeat forever: snap the length to whole bars so
+        // every repeat lands on a bar, and fade the last/first ~6 ms
+        // so the wrap point does not click on every repeat.
+        if (assignment.playMode == PlayMode.LOOP && projectBpm > 0f && buf.size > 4096) {
+            val barFrames = gridFrames(outRate, projectBpm, 4f)
+            if (barFrames > 0) {
+                val bars = maxOf(1, ((buf.size.toDouble() / barFrames) + 0.5).toInt())
+                val target = bars * barFrames
+                if (kotlin.math.abs(target - buf.size) > buf.size * 0.01) {
+                    buf = timeStretch(buf, buf.size.toDouble() / target)
+                }
+            }
+            val fade = minOf(256, buf.size / 4)
+            for (i in 0 until fade) {
+                val f = i.toFloat() / fade
+                buf[i] *= f
+                buf[buf.size - 1 - i] *= f
+            }
+        }
+        buf = lowPass(buf, assignment.filterCutoffHz, outRate)
         if (assignment.gain != 1f) {
             for (i in buf.indices) buf[i] *= assignment.gain
         }

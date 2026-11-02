@@ -19,6 +19,8 @@ data class PlayRxState(
     val delayOn: Boolean = false,
     val currentStep: Int = -1,
     val activeLoops: Set<Int> = emptySet(),
+    /** Loop pads tapped while playing, waiting for the next bar/beat. */
+    val armedLoops: Set<Int> = emptySet(),
     val selectedPad: Int = 0,
     val editPattern: Boolean = false,
     val selectedTab: String = "LOOP",
@@ -48,6 +50,12 @@ data class PlayRxState(
     val sampleSnapToTempo: Boolean = true,
     val sampleCutToGrid: Boolean = false,
     val sampleReverse: Boolean = false,
+    /** Original BPM of the selected pad's sample, or null = unknown. */
+    val sampleOriginalBpm: Float? = null,
+    /** Original key (pitch class) of the selected pad's sample. */
+    val sampleOriginalKey: Int = 0,
+    /** Quantize launch for the selected pad's sample: 0 = off, 1 = beat, 4 = bar. */
+    val sampleQuantizeBeats: Float = 4f,
     val sampleImportError: String? = null,
 )
 
@@ -78,4 +86,7 @@ data class PlayRxActions(
     val onSampleSnapToggle: () -> Unit = {},
     val onSampleCutToggle: () -> Unit = {},
     val onSampleReverseToggle: () -> Unit = {},
+    val onSampleOriginalBpm: (Float) -> Unit = {},
+    val onSampleOriginalKey: (Int) -> Unit = {},
+    val onSampleQuantize: (Float) -> Unit = {},
 )

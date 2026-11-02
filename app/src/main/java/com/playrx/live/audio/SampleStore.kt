@@ -46,6 +46,11 @@ object SampleStore {
 
     fun sampleFile(context: Context, info: SampleInfo): File = File(dir(context), info.fileName)
 
+    /** Replace one manifest entry (original BPM/key edits) and persist it. */
+    fun updateSampleInfo(context: Context, updated: SampleInfo) {
+        saveManifest(context, loadManifest(context).map { if (it.id == updated.id) updated else it })
+    }
+
     /**
      * Import [uri] into the library. Returns the new SampleInfo, or
      * null if the file could not be decoded. [projectBpm] and

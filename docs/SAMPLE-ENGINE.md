@@ -89,3 +89,37 @@ artwork is bundled, downloaded, or copied, even for testing.
 - `MainActivity.kt` — SAF picker, assign, BPM/key refresh.
 - `test/.../audio/SampleEngineTest.kt` — tempo, pitch, key
   dynamics, cut-to-grid, quantize, reverse, manifest, WAV.
+
+## Bar sync + tempo fixes (2026-11-02)
+
+Three user-reported bugs from phone testing, and their real causes:
+
+1. **Loops started mid-bar.** Imported loops were voiced the
+   instant they were tapped, so a tap mid-bar started a loop
+   mid-bar forever. Now loop pads tapped while the transport
+   runs are ARMED (white ring on the pad) and start at their
+   next quantize boundary — Bar by default, Beat or Off in the
+   EDIT panel. Tapping an armed pad cancels the arm; tapping a
+   playing loop stops it immediately. A tap while stopped starts
+   immediately and starts the transport. Synth loop pads use the
+   same arm path, so their patterns also start on a bar.
+2. **Tempo snap did nothing.** Original BPM defaulted to the
+   project BPM at import, so the snap rate was always 1.0x.
+   Now the EDIT panel has Original BPM (60–180) and Original
+   Key sliders for the assigned sample, persisted to the
+   manifest. Set a loop's real BPM and Snap stretches it to the
+   project BPM. A second tempo bug: a 48 kHz file was played at
+   44.1 kHz without conversion (8% slow/flat). Render now
+   converts every sample to the 44100 Hz mixer rate first.
+3. **Trash sound quality.** OLA time-stretch summed Hann grains
+   without normalizing the window overlap, so stretched audio
+   throbbed and peaked. OLA now divides by the accumulated
+   window sum. The mixer also soft-clips with tanh instead of a
+   hard clamp, and LOOP renders get a ~6 ms fade at the wrap
+   point so repeats do not click. LOOP length is also snapped
+   to whole bars at the project BPM, so repeats cannot drift.
+
+Pause also changed: the transport clock only advances while
+playing, and transport-locked (imported loop) voices freeze
+silently while paused, so they resume on the bar. One-shots
+still play out while paused.
