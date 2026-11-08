@@ -69,6 +69,34 @@ private fun drumState(): PlayRxState {
     )
 }
 
+private fun seqState(): PlayRxState {
+    val steps = List(48) { List(16) { false } }.toMutableList()
+    // Kick 1 (pad 0): 4-on-the-floor; Snare 1 (pad 1): backbeat.
+    steps[0] = listOf(true, false, false, false, true, false, false, false, true, false, false, false, true, false, false, false)
+    steps[1] = listOf(false, false, false, false, true, false, false, false, false, false, false, false, true, false, false, false)
+    return PlayRxState(
+        chordText = "C major",
+        midiStatus = "PSR-SX700 connected via USB",
+        isPlaying = true,
+        bpm = 127f,
+        currentStep = 4,
+        selectedPad = 0,
+        selectedTab = "SEQ",
+        selectedPanel = "MIXER",
+        sequences = listOf(Triple("seq-1", "Seq 1", 5), Triple("seq-2", "Chorus", 0)),
+        selectedSequenceId = "seq-1",
+        selectedSequenceLoop = true,
+        selectedSequenceGain = 0.8f,
+        selectedStep = 4,
+        stepVelocity = 0.8f,
+        stepOffset = 0f,
+        stepDuration = 0.25f,
+        stepRoll = 2,
+        stepPitch = 0,
+        steps = steps,
+    )
+}
+
 private fun editMixerState(): PlayRxState {
     val padVolumes = List(48) { 1f }.toMutableList().apply { this[5] = 0.5f }
     val padMuted = List(48) { false }.toMutableList().apply { this[0] = true }
@@ -123,6 +151,10 @@ class PhonePortraitScreenshotTest {
     @Test fun projectSettings() {
         paparazzi.snapshot { PlayRxScreen(playingState().copy(showProjectSettings = true), isLandscape = false) }
     }
+
+    @Test fun seqEditor() {
+        paparazzi.snapshot { PlayRxScreen(seqState(), isLandscape = false) }
+    }
 }
 
 class PhoneLandscapeScreenshotTest {
@@ -150,6 +182,10 @@ class PhoneLandscapeScreenshotTest {
 
     @Test fun projectSettings() {
         paparazzi.snapshot { PlayRxScreen(playingState().copy(showProjectSettings = true), isLandscape = true) }
+    }
+
+    @Test fun seqEditor() {
+        paparazzi.snapshot { PlayRxScreen(seqState(), isLandscape = true) }
     }
 }
 
@@ -179,6 +215,10 @@ class TabletPortraitScreenshotTest {
     @Test fun projectSettings() {
         paparazzi.snapshot { PlayRxScreen(playingState().copy(showProjectSettings = true), isLandscape = false) }
     }
+
+    @Test fun seqEditor() {
+        paparazzi.snapshot { PlayRxScreen(seqState(), isLandscape = false) }
+    }
 }
 
 class TabletLandscapeScreenshotTest {
@@ -206,5 +246,9 @@ class TabletLandscapeScreenshotTest {
 
     @Test fun projectSettings() {
         paparazzi.snapshot { PlayRxScreen(playingState().copy(showProjectSettings = true), isLandscape = true) }
+    }
+
+    @Test fun seqEditor() {
+        paparazzi.snapshot { PlayRxScreen(seqState(), isLandscape = true) }
     }
 }

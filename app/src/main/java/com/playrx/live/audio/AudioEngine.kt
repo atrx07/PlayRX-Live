@@ -258,8 +258,42 @@ class PlaybackEngine {
     var onTransportPositionChanged: ((Int, Int, Float) -> Unit)? = null
     var onLoopsChanged: ((Set<Int>) -> Unit)? = null
 
-    // Sequencer: any pad -> 16 steps (UI edits drum pads)
-    private val pattern = Array(SampleBank.PAD_COUNT) { BooleanArray(16) }
+    // Sequencer: the selected sequence's cells are the pattern.
+    // The old BooleanArray pattern is gone — every step is a
+    // StepCell (velocity / offset / duration / roll / pitch), and
+    // the store holds the whole sequence list (see Sequencer.kt).
+    val sequenceStore = SequenceStore()
+    var isRecording: Boolean = false
+
+    fun sequences(): List<Sequence> = sequenceStore.list()
+    fun selectedSequence(): Sequence? = sequenceStore.selected()
+    fun createSequence(): Sequence = sequenceStore.create()
+    fun deleteSequence(id: String): Boolean = sequenceStore.delete(id)
+    fun selectSequence(id: String): Boolean = sequenceStore.select(id)
+    fun renameSequence(id: String, name: String): Boolean = sequenceStore.rename(id, name)
+    fun setSequenceLoop(loop: Boolean) {
+        sequenceStore.updateSelected { it.copy(loop = loop) }
+    }
+
+    fun setSequenceGain(gain: Float) {
+        sequenceStore.updateSelected { it.copy(gain = gain.coerceIn(0f, 1f)) }
+    }
+
+    fun getStepCell(pad: Int, step: Int): StepCell =
+        sequenceStore.selected()?.cell(pad, step) ?: StepCell()
+
+    fun setStepCell(pad: Int, step: Int, cell: StepCell) {
+        sequenceStore.updateSelected { it.withCell(pad, step, cell) }
+    }
+
+    /** Quantize a live tap into the selected sequence (Drums &
+     * Sounds recording). Returns the step, or -1 when not recording
+     * or the pad is invalid. [beats] defaults to the live transport
+     * clock; tests pass it explicitly. */
+    fun recordPadTap(pad: Int, beats: Double = totalBeats): Int {
+        if (!isRecording) return -1
+        return sequenceStore.recordTap(pad, beats)
+    }
     private val activeLoops = mutableSetOf<Int>()
     // Loop pads tapped while the transport is running, waiting for
     // their quantize boundary (default: next bar). They are NOT in
@@ -474,15 +508,41 @@ class PlaybackEngine {
     }
 
     fun setStep(track: Int, step: Int, on: Boolean) {
-        if (track in 0 until SampleBank.PAD_COUNT && step in 0..15) pattern[track][step] = on
+        if (track in 0 until SampleBank.PAD_COUNT && step in 0..15) {
+            val cur = getStepCell(track, step)
+            setStepCell(track, step, if (on) cur.copy(on = true) else cur.copy(on = false))
+        }
     }
 
     fun getStep(track: Int, step: Int): Boolean =
-        if (track in 0 until SampleBank.PAD_COUNT && step in 0..15) pattern[track][step] else false
+        getStepCell(track, step).on
 
     fun activeLoopPads(): Set<Int> = activeLoops.toSet()
 
-    private data class Voice(val sample: FloatArray, var pos: Int, val volume: Float, val sourcePad: Int = -1, val transportLocked: Boolean = false)
+    private data class Voice(
+        val sample: FloatArray,
+        var pos: Int,
+        val volume: Float,
+        val sourcePad: Int = -1,
+        val transportLocked: Boolean = false,
+        /** Cut the voice short after this many frames (-1 = whole sample).
+         * Per-step Duration in the sequencer. */
+        val maxFrames: Int = -1,
+    )
+
+    /** A step hit waiting out its Offset / Roll subdivision before
+     * it sounds. Counted down in frames inside mixLoop, so a 16th
+     * nudge or a roll subdivision lands on the sample clock, not
+     * on the UI thread. */
+    private data class DelayedVoice(
+        var framesLeft: Int,
+        val sample: FloatArray,
+        val volume: Float,
+        val sourcePad: Int,
+        val maxFrames: Int = -1,
+    )
+
+    private val delayedVoices = mutableListOf<DelayedVoice>()
 
     private val pending = java.util.concurrent.ConcurrentLinkedQueue<Voice>()
     private val voices = mutableListOf<Voice>()
@@ -546,11 +606,17 @@ class PlaybackEngine {
 
     fun setPlaying(playing: Boolean) {
         isPlaying = playing
-        if (!playing) lastStep = -1
+        if (!playing) {
+            lastStep = -1
+            // A hit still waiting out its offset/roll delay dies on
+            // pause — it must not fire late on resume.
+            delayedVoices.clear()
+        }
     }
 
     fun stopAll() {
         voices.clear()
+        delayedVoices.clear()
         voiceSwapRequested = false
         activeLoops.clear()
         pendingLoops.clear()
@@ -574,6 +640,9 @@ class PlaybackEngine {
      * loop stops it immediately (stop is not quantized).
      */
     fun triggerPad(pad: Int) {
+        // Drums & Sounds recording: every tap lands in the selected
+        // sequence, quantized to the nearest 16th (see Sequencer.kt).
+        if (isRecording) recordPadTap(pad)
         val imported = importedSampleFor(pad)
         val assignment = importedPads[pad]?.assignment
         // An imported pad's play mode wins over the column default:
@@ -635,10 +704,60 @@ class PlaybackEngine {
         onLoopsChanged?.invoke(activeLoops.toSet())
     }
 
+    // Pitch-shifted synth one-shots, cached per (pad, semitones):
+    // a step's Pitch param resamples the synth buffer, it does not
+    // re-synthesize. Imported samples ignore per-step pitch — they
+    // keep their own transpose (see docs/SEQUENCER.md).
+    private val pitchedCache = mutableMapOf<Pair<Int, Int>, FloatArray>()
+    private fun pitchedSample(index: Int, semitones: Int): FloatArray {
+        if (semitones == 0) return sample(index)
+        return pitchedCache.getOrPut(index to semitones) {
+            val src = sample(index)
+            val rate = SampleEngine.pitchRate(semitones)
+            val outLen = maxOf(1, (src.size / rate).toInt())
+            val out = FloatArray(outLen)
+            for (i in out.indices) {
+                val pos = i * rate
+                val lo = pos.toInt().coerceIn(0, src.size - 1)
+                val hi = (lo + 1).coerceIn(0, src.size - 1)
+                val frac = (pos - lo).toFloat()
+                out[i] = src[lo] * (1f - frac) + src[hi] * frac
+            }
+            out
+        }
+    }
+
     private fun triggerSample(index: Int, volume: Float = 0.9f, sourcePad: Int = -1) {
+        triggerStepSample(index, volume, sourcePad, StepCell(on = true))
+    }
+
+    /** Fire one sequencer step, honouring its cell: velocity scales
+     * the hit, offset delays it, roll retriggers inside the step,
+     * duration caps the ring, pitch resamples synth pads. A pad
+     * with an imported sample plays that sample (not the synth) —
+     * the old code always played the synth from sequencer steps. */
+    private fun triggerStepSample(index: Int, volume: Float, sourcePad: Int, cell: StepCell) {
         val pad = if (sourcePad in 0 until SampleBank.PAD_COUNT) sourcePad else index
-        val vol = effectiveVolume(pad, volume)
-        if (vol > 0f) pending.add(Voice(sample(index), 0, vol, pad))
+        val vol = effectiveVolume(pad, volume * cell.velocity)
+        if (vol <= 0f) return
+        val imported = importedSampleFor(pad)
+        val buffer = imported ?: pitchedSample(index, cell.pitchSemitones)
+        val framesPerBeat = (SampleBank.SAMPLE_RATE * 60.0 / bpm).toInt().coerceAtLeast(1)
+        val stepFrames = framesPerBeat / 4
+        val hitFrames = (cell.durationBeats * framesPerBeat).toInt().coerceAtLeast(1)
+        val roll = cell.roll.coerceIn(1, 4)
+        for (k in 0 until roll) {
+            // Offset applies to the first hit; roll hits subdivide
+            // the step evenly after it.
+            val delayBeats = cell.offsetBeats + if (roll > 1) k * (0.25f / roll) else 0f
+            val delayFrames = (delayBeats * framesPerBeat).toInt().coerceAtLeast(0)
+            val hitMax = if (roll > 1) (hitFrames / roll).coerceAtLeast(1) else hitFrames
+            if (delayFrames <= 0) {
+                pending.add(Voice(buffer, 0, vol, pad, maxFrames = hitMax))
+            } else {
+                delayedVoices.add(DelayedVoice(delayFrames, buffer, vol, pad, maxFrames = hitMax))
+            }
+        }
     }
 
     private fun mixLoop(at: AudioTrack) {
@@ -670,6 +789,15 @@ class PlaybackEngine {
                 }
                 val step = ((totalBeats * 4).toInt() % 16 + 16) % 16
                 if (step != lastStep) {
+                    val wrapped = lastStep == 15 && step == 0
+                    if (wrapped && sequenceStore.selected()?.loop == false) {
+                        // One-shot sequence: the bar finished, stop
+                        // the transport instead of looping it.
+                        lastStep = -1
+                        isPlaying = false
+                        onStepChanged?.invoke(-1)
+                        onTransportPositionChanged?.invoke(1, 1, 0f)
+                    } else {
                     lastStep = step
                     onStepChanged?.invoke(step)
                     // Circular beat counter (2026-11-02): the baseline
@@ -680,8 +808,10 @@ class PlaybackEngine {
                     val beatInBar = (totalBeats % 4).toInt() + 1
                     val progress = ((totalBeats % 4) / 4).toFloat()
                     onTransportPositionChanged?.invoke(bar, beatInBar, progress)
+                    val seqGain = sequenceStore.selected()?.gain ?: 1f
                     for (trk in 0 until SampleBank.PAD_COUNT) {
-                        if (pattern[trk][step]) triggerSample(trk, 0.9f, trk)
+                        val cell = getStepCell(trk, step)
+                        if (cell.on) triggerStepSample(trk, 0.9f * seqGain, trk, cell)
                     }
                     for (loopPad in activeLoops.toList()) {
                         if (importedPads.containsKey(loopPad)) continue
@@ -693,6 +823,18 @@ class PlaybackEngine {
                     while (true) {
                         val v = pending.poll() ?: break
                         voices.add(v)
+                    }
+                    }
+                }
+                // Offset / roll hits wait out their delay on the
+                // sample clock, frozen while paused.
+                val delayIter = delayedVoices.iterator()
+                while (delayIter.hasNext()) {
+                    val d = delayIter.next()
+                    d.framesLeft -= blockFrames
+                    if (d.framesLeft <= 0) {
+                        delayIter.remove()
+                        voices.add(Voice(d.sample, 0, d.volume, d.sourcePad, maxFrames = d.maxFrames))
                     }
                 }
             }
@@ -744,6 +886,11 @@ class PlaybackEngine {
                     // instead of looping out of phase under a pause.
                     // One-shot voices still play out while paused.
                     if (!isPlaying && v.transportLocked) continue
+                    // Per-step Duration: cut the voice short.
+                    if (v.maxFrames > 0 && v.pos >= v.maxFrames) {
+                        iter.remove()
+                        continue
+                    }
                     if (v.pos >= v.sample.size) {
                         // Imported loop voices loop until the pad is
                         // toggled off; synth voices end at the buffer.

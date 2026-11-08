@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
@@ -731,6 +732,176 @@ private fun SequencerRow(state: PlayRxState, actions: PlayRxActions) {
 }
 
 @Composable
+private fun SeqView(state: PlayRxState, actions: PlayRxActions) {
+    // SEQ for real (2026-11-08): the sequence list + step editor.
+    // List on top (tap to select, Delete removes), general controls
+    // (Loop / One shot, Gain), pad chips for the sounds in the
+    // sequence, the 16-step row for the selected pad, and the
+    // per-step detail strip (Velocity / Offset / Duration / Roll /
+    // Pitch) for the tapped step.
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(
+                "Sequences", style = MaterialTheme.typography.titleMedium, color = TextMain,
+                modifier = Modifier.weight(1f),
+            )
+            Button(
+                onClick = actions.onRecordingToggle,
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = if (state.isRecording) Color(0xFFD32F2F) else DarkTab,
+                    contentColor = if (state.isRecording) Color.White else TextMain,
+                ),
+            ) { Text(if (state.isRecording) "● Recording" else "● Rec") }
+            Button(
+                onClick = actions.onSequenceNew,
+                colors = ButtonDefaults.buttonColors(containerColor = AccentAmber, contentColor = Color.Black),
+            ) { Text("+ New") }
+        }
+        Text(
+            "With ● Rec on, pad taps in LOOP / DRUM quantize into the selected sequence. " +
+                "Tap a step to toggle it and edit its detail below.",
+            style = MaterialTheme.typography.bodySmall, color = TextDim,
+        )
+        for ((id, name, count) in state.sequences) {
+            val sel = id == state.selectedSequenceId
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(
+                    onClick = { actions.onSequenceSelect(id) },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (sel) AccentAmber else DarkTab,
+                        contentColor = if (sel) Color.Black else TextMain,
+                    ),
+                    modifier = Modifier.weight(1f),
+                ) { Text("$name  •  $count steps", maxLines = 1) }
+                Button(
+                    onClick = { actions.onSequenceDelete(id) },
+                    contentPadding = PaddingValues(4.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = DarkTab, contentColor = Color(0xFFFF6B6B)),
+                ) { Text("Delete") }
+            }
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(
+                onClick = actions.onSequenceLoopToggle,
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = if (state.selectedSequenceLoop) AccentAmber else DarkTab,
+                    contentColor = if (state.selectedSequenceLoop) Color.Black else TextMain,
+                ),
+            ) { Text(if (state.selectedSequenceLoop) "Loop" else "One shot") }
+            Text(
+                "Gain: ${(state.selectedSequenceGain * 100).toInt()}%",
+                color = TextMain, modifier = Modifier.weight(1f),
+            )
+            Slider(
+                value = state.selectedSequenceGain,
+                onValueChange = actions.onSequenceGain,
+                valueRange = 0f..1f,
+                colors = SliderDefaults.colors(thumbColor = Color.White, activeTrackColor = AccentAmber, inactiveTrackColor = DarkTab),
+                modifier = Modifier.weight(1f),
+            )
+        }
+        Text(
+            "Sound: ${SampleBank.PAD_NAMES[state.selectedPad]} — tap Edit pattern, pick a pad, then toggle steps",
+            style = MaterialTheme.typography.bodySmall, color = TextDim,
+        )
+        val padsWithSteps = (listOf(state.selectedPad) +
+            state.steps.indices.filter { pad -> state.steps[pad].any { it } })
+            .distinct().sorted()
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            modifier = Modifier.horizontalScroll(rememberScrollState()),
+        ) {
+            for (pad in padsWithSteps) {
+                val sel = pad == state.selectedPad
+                Button(
+                    onClick = { actions.onPadSelect(pad) },
+                    contentPadding = PaddingValues(4.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (sel) Color.White else DarkTab,
+                        contentColor = if (sel) Color.Black else TextDim,
+                    ),
+                ) { Text(SampleBank.PAD_NAMES[pad], fontSize = 10.sp, maxLines = 1, softWrap = false) }
+            }
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(2.dp), modifier = Modifier.fillMaxWidth()) {
+            for (step in 0 until 16) {
+                val on = state.steps[state.selectedPad][step]
+                val isCurrent = state.currentStep == step && state.isPlaying
+                val isDetail = state.selectedStep == step
+                Button(
+                    onClick = {
+                        actions.onStepToggle(state.selectedPad, step)
+                        actions.onStepSelect(step)
+                    },
+                    shape = RoundedCornerShape(8.dp),
+                    contentPadding = PaddingValues(0.dp),
+                    border = when {
+                        isDetail -> BorderStroke(2.dp, AccentAmber)
+                        isCurrent && on -> BorderStroke(2.dp, Color.Black)
+                        isCurrent -> BorderStroke(2.dp, Color.White)
+                        on -> BorderStroke(1.dp, Color.Black.copy(alpha = 0.35f))
+                        else -> BorderStroke(1.dp, Color.White.copy(alpha = 0.15f))
+                    },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (on) PlayingTeal else DarkTab,
+                        contentColor = if (on) Color.Black else TextDim,
+                    ),
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Text((step + 1).toString(), fontSize = 9.sp, maxLines = 1, softWrap = false)
+                }
+            }
+        }
+        if (state.selectedStep >= 0) {
+            Text(
+                "Step ${state.selectedStep + 1} — ${SampleBank.PAD_NAMES[state.selectedPad]}",
+                color = TextMain,
+            )
+            Text("Velocity: ${(state.stepVelocity * 100).toInt()}%", color = TextMain)
+            Slider(
+                value = state.stepVelocity, onValueChange = actions.onStepCellVelocity, valueRange = 0.05f..1f,
+                colors = SliderDefaults.colors(thumbColor = Color.White, activeTrackColor = AccentAmber, inactiveTrackColor = DarkTab),
+            )
+            Text("Offset: ${"%.2f".format(state.stepOffset)} beats (early ← → late)", color = TextMain)
+            Slider(
+                value = state.stepOffset, onValueChange = actions.onStepCellOffset, valueRange = -0.25f..0.25f,
+                colors = SliderDefaults.colors(thumbColor = Color.White, activeTrackColor = AccentAmber, inactiveTrackColor = DarkTab),
+            )
+            Text("Duration: ${"%.2f".format(state.stepDuration)} beats", color = TextMain)
+            Slider(
+                value = state.stepDuration, onValueChange = actions.onStepCellDuration, valueRange = 0.0625f..1f,
+                colors = SliderDefaults.colors(thumbColor = Color.White, activeTrackColor = AccentAmber, inactiveTrackColor = DarkTab),
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Roll:", color = TextMain)
+                for (roll in listOf(1, 2, 4)) {
+                    val sel = state.stepRoll == roll
+                    Button(
+                        onClick = { actions.onStepCellRoll(roll) },
+                        contentPadding = PaddingValues(4.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (sel) AccentAmber else DarkTab,
+                            contentColor = if (sel) Color.Black else TextMain,
+                        ),
+                    ) { Text("x$roll") }
+                }
+            }
+            Text("Pitch: ${state.stepPitch} semitones (synth pads; imported samples keep their own transpose)", color = TextMain)
+            Slider(
+                value = state.stepPitch.toFloat(), onValueChange = { actions.onStepCellPitch(it.toInt()) },
+                valueRange = -12f..12f, steps = 23,
+                colors = SliderDefaults.colors(thumbColor = Color.White, activeTrackColor = AccentAmber, inactiveTrackColor = DarkTab),
+            )
+        } else {
+            Text(
+                "Tap a step to edit its velocity, timing, duration, roll and pitch.",
+                style = MaterialTheme.typography.bodySmall, color = TextDim,
+            )
+        }
+    }
+}
+
+@Composable
 private fun PlaceholderTab(state: PlayRxState) {
     Text(
         "${state.selectedTab} view is next: projects, recording, and the song arranger " +
@@ -765,6 +936,8 @@ private fun PortraitContent(state: PlayRxState, actions: PlayRxActions) {
         TopTabs(state, actions)
         if (state.selectedTab == "LOOP") {
             PadGridRows(state, actions, columns = 4, modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp))
+        } else if (state.selectedTab == "SEQ") {
+            SeqView(state, actions)
         } else if (state.selectedTab == "DRUM") {
             SequencerRow(state, actions)
         } else {
@@ -831,6 +1004,17 @@ private fun LandscapeContent(state: PlayRxState, actions: PlayRxActions) {
             )
         } else if (state.selectedTab == "DRUM") {
             SequencerRow(state, actions)
+            PanelSwitch(state, actions)
+            BottomPanel(
+                state, actions,
+                modifier = Modifier.fillMaxWidth().height(170.dp).verticalScroll(rememberScrollState()).padding(vertical = 8.dp),
+            )
+        } else if (state.selectedTab == "SEQ") {
+            Column(
+                modifier = Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()),
+            ) {
+                SeqView(state, actions)
+            }
             PanelSwitch(state, actions)
             BottomPanel(
                 state, actions,

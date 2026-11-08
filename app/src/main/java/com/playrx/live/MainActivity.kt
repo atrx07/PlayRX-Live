@@ -95,6 +95,8 @@ class MainActivity : ComponentActivity() {
     private var defaultQuantizeBeats by mutableStateOf(4f)
     private var defaultSnapToTempo by mutableStateOf(true)
     private var sampleTempoDetectResult by mutableStateOf<String?>(null)
+    private var selectedStep by mutableStateOf(-1)
+    private var isRecording by mutableStateOf(false)
 
     private fun currentState(): PlayRxState {
         // Read the version counters so pad/column/step edits recompose.
@@ -104,6 +106,9 @@ class MainActivity : ComponentActivity() {
         val mixer = mixerVersion
         @Suppress("UNUSED_VARIABLE")
         val sampleV = sampleVersion
+        val selectedSeq = engine.selectedSequence()
+        val stepCell = if (selectedStep in 0..15) engine.getStepCell(selectedPad, selectedStep)
+            else com.playrx.live.audio.StepCell()
         return PlayRxState(
             chordText = chordText,
             midiStatus = midiStatus,
@@ -119,6 +124,17 @@ class MainActivity : ComponentActivity() {
             defaultQuantizeBeats = defaultQuantizeBeats,
             defaultSnapToTempo = defaultSnapToTempo,
             sampleTempoDetectResult = sampleTempoDetectResult,
+            sequences = engine.sequences().map { Triple(it.id, it.name, it.stepCount()) },
+            selectedSequenceId = selectedSeq?.id ?: "seq-1",
+            selectedSequenceLoop = selectedSeq?.loop ?: true,
+            selectedSequenceGain = selectedSeq?.gain ?: 1f,
+            selectedStep = selectedStep,
+            stepVelocity = stepCell.velocity,
+            stepOffset = stepCell.offsetBeats,
+            stepDuration = stepCell.durationBeats,
+            stepRoll = stepCell.roll,
+            stepPitch = stepCell.pitchSemitones,
+            isRecording = isRecording,
             activeLoops = activeLoops,
             armedLoops = armedLoops,
             selectedPad = selectedPad,
@@ -326,6 +342,78 @@ class MainActivity : ComponentActivity() {
         },
         onDefaultQuantize = { q -> defaultQuantizeBeats = q },
         onDefaultSnapToggle = { defaultSnapToTempo = !defaultSnapToTempo },
+        onPadSelect = { pad ->
+            selectedPad = pad
+            selectedStep = -1
+        },
+        onSequenceSelect = { id ->
+            engine.selectSequence(id)
+            selectedStep = -1
+            patternVersion++
+        },
+        onSequenceNew = {
+            engine.createSequence()
+            selectedStep = -1
+            patternVersion++
+        },
+        onSequenceDelete = { id ->
+            engine.deleteSequence(id)
+            selectedStep = -1
+            patternVersion++
+        },
+        onSequenceLoopToggle = {
+            val cur = engine.selectedSequence()
+            if (cur != null) {
+                engine.setSequenceLoop(!cur.loop)
+                patternVersion++
+            }
+        },
+        onSequenceGain = { gain ->
+            engine.setSequenceGain(gain)
+            patternVersion++
+        },
+        onStepSelect = { step ->
+            selectedStep = step
+        },
+        onStepCellVelocity = { v ->
+            if (selectedStep in 0..15) {
+                val cur = engine.getStepCell(selectedPad, selectedStep)
+                engine.setStepCell(selectedPad, selectedStep, cur.copy(on = true, velocity = v))
+                patternVersion++
+            }
+        },
+        onStepCellOffset = { v ->
+            if (selectedStep in 0..15) {
+                val cur = engine.getStepCell(selectedPad, selectedStep)
+                engine.setStepCell(selectedPad, selectedStep, cur.copy(on = true, offsetBeats = v))
+                patternVersion++
+            }
+        },
+        onStepCellDuration = { v ->
+            if (selectedStep in 0..15) {
+                val cur = engine.getStepCell(selectedPad, selectedStep)
+                engine.setStepCell(selectedPad, selectedStep, cur.copy(on = true, durationBeats = v))
+                patternVersion++
+            }
+        },
+        onStepCellRoll = { roll ->
+            if (selectedStep in 0..15) {
+                val cur = engine.getStepCell(selectedPad, selectedStep)
+                engine.setStepCell(selectedPad, selectedStep, cur.copy(on = true, roll = roll))
+                patternVersion++
+            }
+        },
+        onStepCellPitch = { pitch ->
+            if (selectedStep in 0..15) {
+                val cur = engine.getStepCell(selectedPad, selectedStep)
+                engine.setStepCell(selectedPad, selectedStep, cur.copy(on = true, pitchSemitones = pitch))
+                patternVersion++
+            }
+        },
+        onRecordingToggle = {
+            isRecording = !isRecording
+            engine.isRecording = isRecording
+        },
         onPadVolume = { pad, volume ->
             engine.setPadVolume(pad, volume)
             mixerVersion++
@@ -351,10 +439,10 @@ class MainActivity : ComponentActivity() {
             mixerVersion++
         },
         onStepToggle = { pad, step ->
-            if (SampleBank.isDrumPad(pad)) {
-                engine.setStep(pad, step, !engine.getStep(pad, step))
-                patternVersion++
-            }
+            // SEQ covers every sound, not just drum pads: a sequence
+            // row can hold a bass note or a synth stab as well as a kick.
+            engine.setStep(pad, step, !engine.getStep(pad, step))
+            patternVersion++
         },
     )
 

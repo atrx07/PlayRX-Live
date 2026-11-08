@@ -66,8 +66,11 @@ the grid and hid Edit/Mixer below the fold. Never restore it.
   Offset (timing/swing), Duration, Roll, Pitch. General controls:
   Loop / One shot, Gain, Quantize, Replay, length in beats.
   Recording a sequence goes through Drum View, then back to Seq.
-  PlayRX v1: Seq is a placeholder; the step editor lives on the
-  Drum tab for now.
+  PlayRX (2026-11-08, `docs/SEQUENCER.md`): **built** — sequence
+  list (New / Delete / select), Loop / One shot, Gain, ● Rec
+  (pad taps quantize into the selected sequence), per-step
+  Velocity / Offset / Duration / Roll / Pitch. One bar per
+  sequence for now; rename UI and multi-bar lengths come later.
 - **Song** — a timeline, NOT a grid: numbered bars across the
   top, tracks down the left, clips/loops placed on it, same
   Mixer panel below. Pinch to zoom, cut/copy/duplicate/shrink/

@@ -68,11 +68,28 @@ data class PlayRxState(
     /** Result of the last Detect-tempo run, shown in EDIT. */
     val sampleTempoDetectResult: String? = null,
     val sampleImportError: String? = null,
+    // ---- SEQ for real (2026-11-08) ----
+    /** Sequence list: (id, name, step count). */
+    val sequences: List<Triple<String, String, Int>> = listOf(Triple("seq-1", "Seq 1", 0)),
+    val selectedSequenceId: String = "seq-1",
+    val selectedSequenceLoop: Boolean = true,
+    val selectedSequenceGain: Float = 1f,
+    /** Step selected in the SEQ editor for per-step detail, -1 = none. */
+    val selectedStep: Int = -1,
+    /** Per-step parameters of the selected step (defaults when off). */
+    val stepVelocity: Float = 1f,
+    val stepOffset: Float = 0f,
+    val stepDuration: Float = 0.25f,
+    val stepRoll: Int = 1,
+    val stepPitch: Int = 0,
+    /** Drums & Sounds recording: pad taps quantize into the sequence. */
+    val isRecording: Boolean = false,
 )
 
 /** Every user action the screen can trigger. No-ops by default for screenshots. */
 data class PlayRxActions(
     val onPadClick: (Int) -> Unit = {},
+    val onPadSelect: (Int) -> Unit = {},
     val onPlayToggle: () -> Unit = {},
     val onStop: () -> Unit = {},
     val onConnectMidi: () -> Unit = {},
@@ -105,4 +122,16 @@ data class PlayRxActions(
     val onProjectSettingsToggle: () -> Unit = {},
     val onDefaultQuantize: (Float) -> Unit = {},
     val onDefaultSnapToggle: () -> Unit = {},
+    val onSequenceSelect: (String) -> Unit = {},
+    val onSequenceNew: () -> Unit = {},
+    val onSequenceDelete: (String) -> Unit = {},
+    val onSequenceLoopToggle: () -> Unit = {},
+    val onSequenceGain: (Float) -> Unit = {},
+    val onStepSelect: (Int) -> Unit = {},
+    val onStepCellVelocity: (Float) -> Unit = {},
+    val onStepCellOffset: (Float) -> Unit = {},
+    val onStepCellDuration: (Float) -> Unit = {},
+    val onStepCellRoll: (Int) -> Unit = {},
+    val onStepCellPitch: (Int) -> Unit = {},
+    val onRecordingToggle: () -> Unit = {},
 )
