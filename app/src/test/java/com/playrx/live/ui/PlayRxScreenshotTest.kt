@@ -120,7 +120,7 @@ private fun editState(): PlayRxState {
         sampleRepeat = 1,
         sampleTrimStart = 0.1f,
         sampleTrimEnd = 0.9f,
-        samplePeaks = List(64) { i -> (0.35f + 0.6f * kotlin.math.abs(kotlin.math.sin(i * 0.35))).coerceIn(0f, 1f) },
+        samplePeaks = List(64) { i -> (0.35f + 0.6f * kotlin.math.abs(kotlin.math.sin(i * 0.35).toFloat())).coerceIn(0f, 1f) },
     )
 }
 

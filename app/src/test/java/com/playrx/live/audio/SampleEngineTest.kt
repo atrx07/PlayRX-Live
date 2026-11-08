@@ -400,13 +400,13 @@ class SampleEngineTest {
             input, assignment().copy(repeatCount = 2, snapToTempo = false),
             info(), 120f, 0,
         )
-        assertEquals(44100, out.size, 100)
+        assertTrue("repeat x2 length ${out.size} should be ~44100", abs(out.size - 44100) <= 100)
         // LOOP pads ignore repeat: they snap to whole bars instead.
         val loop = SampleEngine.renderPadSample(
             input, assignment().copy(playMode = PlayMode.LOOP, repeatCount = 3, snapToTempo = false),
             info(), 120f, 0,
         )
-        assertEquals(88200, loop.size, 3000)
+        assertTrue("loop length ${loop.size} should be ~88200 (1 bar)", abs(loop.size - 88200) <= 3000)
     }
 
     @Test
@@ -442,6 +442,6 @@ class SampleEngineTest {
             input, assignment().copy(snapToTempo = false, startFrame = 11025, endFrame = 33075),
             info(), 120f, 0,
         )
-        assertEquals(22050, out.size, 100)
+        assertTrue("trim length ${out.size} should be ~22050", abs(out.size - 22050) <= 100)
     }
 }
