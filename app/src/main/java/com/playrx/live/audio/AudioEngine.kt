@@ -398,7 +398,6 @@ class PlaybackEngine {
     fun deleteSequence(id: String): Boolean = sequenceStore.delete(id)
     fun selectSequence(id: String): Boolean = sequenceStore.select(id)
     fun renameSequence(id: String, name: String): Boolean = sequenceStore.rename(id, name)
-    fun renameSequence(id: String, name: String): Boolean = sequenceStore.rename(id, name)
     fun setSequenceLoop(loop: Boolean) {
         sequenceStore.updateSelected { it.copy(loop = loop) }
     }
