@@ -258,6 +258,12 @@ class PlaybackEngine {
     var onTransportPositionChanged: ((Int, Int, Float) -> Unit)? = null
     var onLoopsChanged: ((Set<Int>) -> Unit)? = null
 
+    // Sequencer: the selected sequence's cells are the pattern.
+    // Every step is a StepCell (velocity / offset / duration /
+    // roll / pitch), and the store holds the whole sequence list
+    // (see Sequencer.kt).
+    val sequenceStore = SequenceStore()
+
     // SONG timeline (2026-11-08, see SongEngine.kt): the
     // arrangement drives loop pads while the transport runs in
     // SONG. songEnabled is set by the UI from the selected tab —

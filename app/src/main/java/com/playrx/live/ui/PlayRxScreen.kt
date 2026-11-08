@@ -1234,28 +1234,40 @@ private fun LandscapeContent(state: PlayRxState, actions: PlayRxActions) {
                 style = MaterialTheme.typography.bodySmall, color = TextDim,
             )
         } else if (state.selectedTab == "SEQ") {
-            Column(
-                modifier = Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()),
-            ) {
-                SeqView(state, actions)
+            // Same right-panel layout as LOOP/DRUM: content left,
+            // ONE switchable panel right. The earlier layout stacked
+            // the panel switch + a 170dp panel below the content,
+            // which left the SEQ editor ~0dp tall in phone landscape
+            // (verified in the dc195a5 screenshots: panel only, no
+            // Sequences list visible).
+            Row(modifier = Modifier.weight(1f).fillMaxWidth().padding(vertical = 8.dp)) {
+                Column(
+                    modifier = Modifier.weight(1f).fillMaxHeight().verticalScroll(rememberScrollState()).padding(end = 12.dp),
+                ) {
+                    SeqView(state, actions)
+                }
+                Column(
+                    modifier = Modifier.width(260.dp).fillMaxHeight().verticalScroll(rememberScrollState()),
+                ) {
+                    PanelSwitch(state, actions)
+                    BottomPanel(state, actions, modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp))
+                }
             }
-            PanelSwitch(state, actions)
-            BottomPanel(
-                state, actions,
-                modifier = Modifier.fillMaxWidth().height(170.dp).verticalScroll(rememberScrollState()).padding(vertical = 8.dp),
-            )
         } else {
-            // SONG: timeline in the scrollable area, same panel below.
-            Column(
-                modifier = Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()),
-            ) {
-                SongView(state, actions)
+            // SONG: same right-panel layout as SEQ above.
+            Row(modifier = Modifier.weight(1f).fillMaxWidth().padding(vertical = 8.dp)) {
+                Column(
+                    modifier = Modifier.weight(1f).fillMaxHeight().verticalScroll(rememberScrollState()).padding(end = 12.dp),
+                ) {
+                    SongView(state, actions)
+                }
+                Column(
+                    modifier = Modifier.width(260.dp).fillMaxHeight().verticalScroll(rememberScrollState()),
+                ) {
+                    PanelSwitch(state, actions)
+                    BottomPanel(state, actions, modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp))
+                }
             }
-            PanelSwitch(state, actions)
-            BottomPanel(
-                state, actions,
-                modifier = Modifier.fillMaxWidth().height(170.dp).verticalScroll(rememberScrollState()).padding(vertical = 8.dp),
-            )
         }
     }
 }
