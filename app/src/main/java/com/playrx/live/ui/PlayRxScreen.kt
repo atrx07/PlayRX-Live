@@ -965,15 +965,145 @@ private fun SeqView(state: PlayRxState, actions: PlayRxActions) {
 }
 
 @Composable
-private fun PlaceholderTab(state: PlayRxState) {
-    Text(
-        "${state.selectedTab} view is next: projects, recording, and the song arranger " +
-            "come after the pad and mixer are proven. PlayRX's edge over a " +
-            "closed pad app is USB MIDI chord-following with a Yamaha keyboard, " +
-            "open source, and no paywall.",
-        style = MaterialTheme.typography.bodySmall, color = TextDim,
-        modifier = Modifier.padding(vertical = 12.dp),
-    )
+private fun SongView(state: PlayRxState, actions: PlayRxActions) {
+    // SONG for real (2026-11-08): a timeline, not a grid. Bars
+    // across the top, the 8 instrument columns as tracks down the
+    // left, clips placed on it. Tap an empty cell to place the
+    // selected pad as a 1-bar clip; tap a clip to edit it (move,
+    // grow/shrink, duplicate, split, delete). The amber outline is
+    // the playhead bar while the transport runs in SONG.
+    val cellWidth = when (state.songVisibleBars) {
+        4 -> 72.dp
+        8 -> 48.dp
+        else -> 28.dp
+    }
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(
+                "Song — timeline", style = MaterialTheme.typography.titleMedium, color = TextMain,
+                modifier = Modifier.weight(1f),
+            )
+            for (zoom in listOf(4, 8, 16)) {
+                val sel = state.songVisibleBars == zoom
+                Button(
+                    onClick = { actions.onSongZoom(zoom) },
+                    contentPadding = PaddingValues(4.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (sel) AccentAmber else DarkTab,
+                        contentColor = if (sel) Color.Black else TextMain,
+                    ),
+                ) { Text("$zoom bars", fontSize = 10.sp, maxLines = 1, softWrap = false) }
+            }
+        }
+        Text(
+            "Tap an empty cell to place ${SampleBank.PAD_NAMES[state.selectedPad]} as a 1-bar clip. " +
+                "Tap a clip to edit it. Clips play when the transport runs in SONG.",
+            style = MaterialTheme.typography.bodySmall, color = TextDim,
+        )
+        Column(modifier = Modifier.horizontalScroll(rememberScrollState())) {
+            Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                Box(modifier = Modifier.width(52.dp))
+                for (bar in 1..state.songLengthBars) {
+                    Box(
+                        modifier = Modifier.width(cellWidth),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            "$bar",
+                            color = if (bar == state.songBar && state.isPlaying) AccentAmber else TextDim,
+                            fontSize = 10.sp, fontWeight = if (bar == state.songBar && state.isPlaying) FontWeight.Bold else FontWeight.Normal,
+                        )
+                    }
+                }
+            }
+            for (track in 0 until SampleBank.COLUMNS) {
+                Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(
+                        SampleBank.COLUMN_NAMES[track],
+                        modifier = Modifier.width(52.dp),
+                        color = columnColor(track), fontSize = 11.sp, maxLines = 1,
+                    )
+                    var bar = 1
+                    while (bar <= state.songLengthBars) {
+                        val clip = state.songClips.firstOrNull { it.track == track && it.startBar == bar }
+                        if (clip != null) {
+                            val sel = clip.id == state.selectedClipId
+                            Button(
+                                onClick = { actions.onSongClipSelect(clip.id) },
+                                shape = RoundedCornerShape(8.dp),
+                                contentPadding = PaddingValues(2.dp),
+                                border = if (sel) BorderStroke(2.dp, AccentAmber) else BorderStroke(1.dp, Color.Black.copy(alpha = 0.35f)),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = columnColor(track),
+                                    contentColor = if (track == 2) Color.Black else Color.White,
+                                ),
+                                modifier = Modifier.width(cellWidth * clip.lengthBars).height(36.dp),
+                            ) {
+                                Text(SampleBank.PAD_NAMES[clip.pad], fontSize = 9.sp, maxLines = 1, softWrap = false)
+                            }
+                            bar += clip.lengthBars
+                        } else {
+                            val isPlayhead = bar == state.songBar && state.isPlaying
+                            Button(
+                                onClick = { actions.onSongClipPlace(track, bar) },
+                                shape = RoundedCornerShape(8.dp),
+                                contentPadding = PaddingValues(0.dp),
+                                border = if (isPlayhead) BorderStroke(2.dp, AccentAmber) else BorderStroke(1.dp, Color.White.copy(alpha = 0.15f)),
+                                colors = ButtonDefaults.buttonColors(containerColor = DarkTab, contentColor = TextDim),
+                                modifier = Modifier.width(cellWidth).height(36.dp),
+                            ) { Text("", fontSize = 9.sp) }
+                            bar += 1
+                        }
+                    }
+                }
+            }
+        }
+        val clip = state.songClips.firstOrNull { it.id == state.selectedClipId }
+        if (clip != null) {
+            Text(
+                "Clip: ${SampleBank.PAD_NAMES[clip.pad]} — ${SampleBank.COLUMN_NAMES[clip.track]}, " +
+                    "bar ${clip.startBar}, ${clip.lengthBars} bar(s)",
+                color = TextMain,
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(
+                    onClick = { actions.onSongClipMove(-1) },
+                    colors = ButtonDefaults.buttonColors(containerColor = DarkTab, contentColor = TextMain),
+                ) { Text("← Move") }
+                Button(
+                    onClick = { actions.onSongClipMove(1) },
+                    colors = ButtonDefaults.buttonColors(containerColor = DarkTab, contentColor = TextMain),
+                ) { Text("Move →") }
+                Button(
+                    onClick = { actions.onSongClipLength(-1) },
+                    colors = ButtonDefaults.buttonColors(containerColor = DarkTab, contentColor = TextMain),
+                ) { Text("− Bar") }
+                Button(
+                    onClick = { actions.onSongClipLength(1) },
+                    colors = ButtonDefaults.buttonColors(containerColor = DarkTab, contentColor = TextMain),
+                ) { Text("+ Bar") }
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(
+                    onClick = actions.onSongClipDuplicate,
+                    colors = ButtonDefaults.buttonColors(containerColor = DarkTab, contentColor = TextMain),
+                ) { Text("Duplicate") }
+                Button(
+                    onClick = actions.onSongClipSplit,
+                    colors = ButtonDefaults.buttonColors(containerColor = DarkTab, contentColor = TextMain),
+                ) { Text("Split") }
+                Button(
+                    onClick = actions.onSongClipDelete,
+                    colors = ButtonDefaults.buttonColors(containerColor = DarkTab, contentColor = Color(0xFFFF6B6B)),
+                ) { Text("Delete") }
+            }
+        } else {
+            Text(
+                "No clip selected.",
+                style = MaterialTheme.typography.bodySmall, color = TextDim,
+            )
+        }
+    }
 }
 
 @Composable
@@ -1013,7 +1143,7 @@ private fun PortraitContent(state: PlayRxState, actions: PlayRxActions) {
             )
             ScaleKeyboardView(state, actions, modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp))
         } else {
-            PlaceholderTab(state)
+            SongView(state, actions)
         }
         // Switchable bottom panel, NOT stacked inside LOOP: Edit and
         // Mixer are their own panels (Tutorial Tour structure).
@@ -1115,7 +1245,12 @@ private fun LandscapeContent(state: PlayRxState, actions: PlayRxActions) {
                 modifier = Modifier.fillMaxWidth().height(170.dp).verticalScroll(rememberScrollState()).padding(vertical = 8.dp),
             )
         } else {
-            PlaceholderTab(state)
+            // SONG: timeline in the scrollable area, same panel below.
+            Column(
+                modifier = Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()),
+            ) {
+                SongView(state, actions)
+            }
             PanelSwitch(state, actions)
             BottomPanel(
                 state, actions,

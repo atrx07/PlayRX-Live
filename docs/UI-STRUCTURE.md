@@ -77,8 +77,11 @@ the grid and hid Edit/Mixer below the fold. Never restore it.
 - **Song** — a timeline, NOT a grid: numbered bars across the
   top, tracks down the left, clips/loops placed on it, same
   Mixer panel below. Pinch to zoom, cut/copy/duplicate/shrink/
-  remove clips, share as stems or full track. PlayRX v1:
-  placeholder.
+  remove clips, share as stems or full track. PlayRX (2026-11-08,
+  `docs/SONG.md`): **built** — 16-bar timeline, 8 tracks, clips
+  play loop pads for their bars (one-shots fire at the start bar),
+  move / grow / shrink / duplicate / split / delete, zoom as cell
+  width. No pinch zoom yet; share-as-stems lands with recording.
 - **Live Set** — home-screen set of projects in chronological
   order; perform across Loop/Drum/Mixer/FX, move to the next
   project. Not built yet.

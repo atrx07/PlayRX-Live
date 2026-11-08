@@ -99,6 +99,9 @@ class MainActivity : ComponentActivity() {
     private var isRecording by mutableStateOf(false)
     private var scaleName by mutableStateOf("Major")
     private var scaleOctave by mutableStateOf(4)
+    private var selectedClipId by mutableStateOf<String?>(null)
+    private var songVisibleBars by mutableStateOf(8)
+    private var songVersion by mutableStateOf(0)
 
     private fun currentState(): PlayRxState {
         // Read the version counters so pad/column/step edits recompose.
@@ -108,6 +111,8 @@ class MainActivity : ComponentActivity() {
         val mixer = mixerVersion
         @Suppress("UNUSED_VARIABLE")
         val sampleV = sampleVersion
+        @Suppress("UNUSED_VARIABLE")
+        val songV = songVersion
         val selectedSeq = engine.selectedSequence()
         val stepCell = if (selectedStep in 0..15) engine.getStepCell(selectedPad, selectedStep)
             else com.playrx.live.audio.StepCell()
@@ -139,6 +144,11 @@ class MainActivity : ComponentActivity() {
             isRecording = isRecording,
             scaleName = scaleName,
             scaleOctave = scaleOctave,
+            songClips = engine.songTimeline.list(),
+            selectedClipId = selectedClipId,
+            songLengthBars = engine.songTimeline.lengthBars,
+            songVisibleBars = songVisibleBars,
+            songBar = ((transportBar - 1) % engine.songTimeline.lengthBars.coerceAtLeast(1)) + 1,
             activeLoops = activeLoops,
             armedLoops = armedLoops,
             selectedPad = selectedPad,
@@ -218,7 +228,10 @@ class MainActivity : ComponentActivity() {
             engine.delayEnabled = it
         },
         onEditToggle = { editPattern = !editPattern },
-        onTabSelect = { selectedTab = it },
+        onTabSelect = {
+            selectedTab = it
+            engine.setSongEnabled(it == "SONG")
+        },
         onPanelSelect = { selectedPanel = it },
         onProjectKeyChange = { key ->
             projectKeyMidi = key
@@ -433,6 +446,61 @@ class MainActivity : ComponentActivity() {
         },
         onScaleNote = { midi ->
             engine.playNote(midi, pad = selectedPad)
+        },
+        onSongClipPlace = { track, bar ->
+            val clip = engine.songTimeline.addClip(
+                track, bar, 1, selectedPad, SampleBank.PAD_NAMES[selectedPad],
+            )
+            selectedClipId = clip?.id
+            songVersion++
+        },
+        onSongClipSelect = { id ->
+            selectedClipId = id
+        },
+        onSongClipMove = { delta ->
+            val clip = engine.songTimeline.list().firstOrNull { it.id == selectedClipId }
+            if (clip != null) {
+                engine.songTimeline.moveClip(clip.id, clip.track, clip.startBar + delta)
+                songVersion++
+            }
+        },
+        onSongClipLength = { delta ->
+            val clip = engine.songTimeline.list().firstOrNull { it.id == selectedClipId }
+            if (clip != null) {
+                engine.songTimeline.resizeClip(clip.id, clip.lengthBars + delta)
+                songVersion++
+            }
+        },
+        onSongClipDuplicate = {
+            val clip = engine.songTimeline.list().firstOrNull { it.id == selectedClipId }
+            if (clip != null) {
+                // First free slot of the same length at/after the clip end.
+                var bar = clip.endBar + 1
+                var dup: com.playrx.live.audio.SongClip? = null
+                while (bar + clip.lengthBars - 1 <= engine.songTimeline.lengthBars && dup == null) {
+                    dup = engine.songTimeline.duplicateClip(clip.id, bar)
+                    bar++
+                }
+                selectedClipId = dup?.id ?: selectedClipId
+                songVersion++
+            }
+        },
+        onSongClipSplit = {
+            val clip = engine.songTimeline.list().firstOrNull { it.id == selectedClipId }
+            if (clip != null && clip.lengthBars >= 2) {
+                engine.songTimeline.splitClip(clip.id, clip.startBar + clip.lengthBars / 2)
+                songVersion++
+            }
+        },
+        onSongClipDelete = {
+            if (selectedClipId != null) {
+                engine.songTimeline.removeClip(selectedClipId!!)
+                selectedClipId = null
+                songVersion++
+            }
+        },
+        onSongZoom = { bars ->
+            songVisibleBars = bars
         },
         onPadVolume = { pad, volume ->
             engine.setPadVolume(pad, volume)

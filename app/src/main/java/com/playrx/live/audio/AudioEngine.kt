@@ -258,11 +258,65 @@ class PlaybackEngine {
     var onTransportPositionChanged: ((Int, Int, Float) -> Unit)? = null
     var onLoopsChanged: ((Set<Int>) -> Unit)? = null
 
-    // Sequencer: the selected sequence's cells are the pattern.
-    // The old BooleanArray pattern is gone — every step is a
-    // StepCell (velocity / offset / duration / roll / pitch), and
-    // the store holds the whole sequence list (see Sequencer.kt).
-    val sequenceStore = SequenceStore()
+    // SONG timeline (2026-11-08, see SongEngine.kt): the
+    // arrangement drives loop pads while the transport runs in
+    // SONG. songEnabled is set by the UI from the selected tab —
+    // the timeline must not hijack pads while the player is in
+    // LOOP / DRUM / SEQ. songActivePads are the pads the song
+    // itself started, so leaving SONG (or a clip ending) stops
+    // exactly those, never a pad the player tapped by hand — with
+    // one honest exception, noted in docs/SONG.md: a pad the song
+    // started is stopped by the song at the clip end even if the
+    // player tapped it too in the meantime.
+    val songTimeline = SongTimeline()
+    var songEnabled: Boolean = false
+        private set
+    private var songActivePads = mutableSetOf<Int>()
+    private var lastSongBar = 1
+
+    fun setSongEnabled(enabled: Boolean) {
+        if (songEnabled == enabled) return
+        songEnabled = enabled
+        if (!enabled) {
+            for (pad in songActivePads) {
+                activeLoops.remove(pad)
+                voices.removeAll { it.sourcePad == pad }
+            }
+            songActivePads.clear()
+            onLoopsChanged?.invoke(activeLoops.toSet())
+        } else if (isPlaying) {
+            updateSongClips((totalBeats / 4).toInt() + 1)
+        }
+    }
+
+    /** Start/stop loop pads for [bar] (1-based, transport bar).
+     * Loop pads start for their clip's bars; one-shot pads fire
+     * once at the clip's start. Called on every bar change while
+     * the transport runs in SONG. */
+    fun updateSongClips(bar: Int) {
+        if (!songEnabled) return
+        val songBar = ((bar - 1) % songTimeline.lengthBars.coerceAtLeast(1)) + 1
+        val active = songTimeline.clipsAtBar(songBar)
+        val want = active.map { it.pad }.toSet()
+        for (pad in songActivePads - want) {
+            activeLoops.remove(pad)
+            voices.removeAll { it.sourcePad == pad }
+        }
+        for (clip in active) {
+            val pad = clip.pad
+            if (pad in songActivePads) continue
+            val assignment = importedPads[pad]?.assignment
+            val isLooping = assignment?.playMode == PlayMode.LOOP ||
+                (assignment == null && SampleBank.isLoopPad(pad))
+            if (isLooping) {
+                if (pad !in activeLoops) startLoopPad(pad, importedSampleFor(pad))
+            } else {
+                triggerSample(pad, 0.9f, pad)
+            }
+        }
+        songActivePads = want.toMutableSet()
+        onLoopsChanged?.invoke(activeLoops.toSet())
+    }
     var isRecording: Boolean = false
 
     fun sequences(): List<Sequence> = sequenceStore.list()
@@ -653,12 +707,18 @@ class PlaybackEngine {
             // A hit still waiting out its offset/roll delay dies on
             // pause — it must not fire late on resume.
             delayedVoices.clear()
+        } else if (totalBeats == 0.0 && songEnabled) {
+            // Starting from Stop in SONG: bar 1 clips start now.
+            lastSongBar = 1
+            updateSongClips(1)
         }
     }
 
     fun stopAll() {
         voices.clear()
         delayedVoices.clear()
+        songActivePads.clear()
+        lastSongBar = 1
         voiceSwapRequested = false
         activeLoops.clear()
         pendingLoops.clear()
@@ -877,6 +937,15 @@ class PlaybackEngine {
                     if (d.framesLeft <= 0) {
                         delayIter.remove()
                         voices.add(Voice(d.sample, 0, d.volume, d.sourcePad, maxFrames = d.maxFrames))
+                    }
+                }
+                // SONG timeline: on every bar line, start/stop the
+                // clips covering the new bar.
+                if (songEnabled) {
+                    val barNow = (totalBeats / 4).toInt() + 1
+                    if (barNow != lastSongBar) {
+                        lastSongBar = barNow
+                        updateSongClips(barNow)
                     }
                 }
             }

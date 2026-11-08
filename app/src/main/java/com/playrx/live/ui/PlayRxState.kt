@@ -89,6 +89,14 @@ data class PlayRxState(
     val scaleName: String = "Major",
     /** MIDI octave of the keyboard's first note (2..6, C4 = 4). */
     val scaleOctave: Int = 4,
+    // ---- SONG timeline (2026-11-08) ----
+    val songClips: List<com.playrx.live.audio.SongClip> = emptyList(),
+    val selectedClipId: String? = null,
+    val songLengthBars: Int = 16,
+    /** Bars visible at once: 4 (wide cells), 8, or 16. */
+    val songVisibleBars: Int = 8,
+    /** Current bar inside the song loop (1..lengthBars). */
+    val songBar: Int = 1,
 )
 
 /** Every user action the screen can trigger. No-ops by default for screenshots. */
@@ -143,4 +151,12 @@ data class PlayRxActions(
     val onScaleSelect: (String) -> Unit = {},
     val onScaleOctave: (Int) -> Unit = {},
     val onScaleNote: (Int) -> Unit = {},
+    val onSongClipPlace: (Int, Int) -> Unit = { _, _ -> },
+    val onSongClipSelect: (String?) -> Unit = {},
+    val onSongClipMove: (Int) -> Unit = {},
+    val onSongClipLength: (Int) -> Unit = {},
+    val onSongClipDuplicate: () -> Unit = {},
+    val onSongClipSplit: () -> Unit = {},
+    val onSongClipDelete: () -> Unit = {},
+    val onSongZoom: (Int) -> Unit = {},
 )
