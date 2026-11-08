@@ -27,9 +27,13 @@ the grid and hid Edit/Mixer below the fold. Never restore it.
 - **Edit** — selected pad/sample: waveform/timeline, play modes
   Loop / One shot / Gate, Gain, Pan, Filter, Transposition,
   Transport, Quantize, Repeat, Reverse, Reset, Import / Replace.
-  PlayRX v1 implements the honest subset: pad volume/mute/solo
-  plus "Edit pattern" (select a pad without playing it).
-  Waveform, Gate, Reverse, Transpose are NOT built yet — do not
+  PlayRX built 2026-11-08: pad volume/mute/solo, waveform with
+  trim markers, Gain / Pan (real stereo) / Filter sliders,
+  Repeat (one-shot/GATE), trim start/end, Unload / Replace,
+  GATE hold-to-play, plus the earlier play-mode / transpose /
+  snap / cut / reverse / BPM-detect / key / quantize controls.
+  Double-tap reset of a knob is not built; neither is per-pad
+  multi-slice.
   render them as if they work.
 - **Mixer** — lower panel with two tabs inside it: Volume
   (VOLUMES: 8 faders, one per column, colour-coded, M and S under
@@ -44,10 +48,13 @@ the grid and hid Edit/Mixer below the fold. Never restore it.
   beat repeat (1/16–2), XY pad (X = master filter, Y = delay
   mix), per-column delay sends. No reverb, no per-pad inserts.
 - **Samples / Collection** — folders/tags/packs, AI recommendations
-  for replacing a pad's sample. PlayRX v1: placeholder only.
-  The planned route is sample import in PlayRX's own JSON
-  manifest format, loading WAV/OGG the user legally owns.
-  Never fetch or bundle a Remixlive pack, even for testing.
+  for replacing a pad's sample. PlayRX built 2026-11-08: search
+  by name, category filter chips (Drum/Bass/Melody/Pad/Vox/FX),
+  and "Suggested for this pad" (same-category samples, Assign
+  straight from the suggestion). Folders/packs and AI
+  recommendations are not built. The collection is PlayRX's own
+  JSON manifest, loading WAV/OGG the user legally owns. Never
+  fetch or bundle a Remixlive pack, even for testing.
 
 ## Views
 

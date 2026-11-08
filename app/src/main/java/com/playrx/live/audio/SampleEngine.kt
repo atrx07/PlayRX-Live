@@ -106,6 +106,9 @@ data class PadSample(
     /** Quantize launch in beats: 0 = none, 1 = beat, 4 = bar. */
     val quantizeBeats: Float = 0f,
     val followProjectKey: Boolean = true,
+    /** Retrigger count for ONE_SHOT / GATE pads (1 = once).
+     * LOOP pads ignore it — they loop until stopped. */
+    val repeatCount: Int = 1,
 )
 
 object SampleEngine {
@@ -491,6 +494,23 @@ object SampleEngine {
         buf = lowPass(buf, assignment.filterCutoffHz, outRate)
         if (assignment.gain != 1f) {
             for (i in buf.indices) buf[i] *= assignment.gain
+        }
+        // Repeat: a one-shot / GATE pad retriggers its buffer N
+        // times back to back. LOOP pads ignore it (they loop until
+        // stopped). Capped at 30 s total so a long sample cannot
+        // balloon the render.
+        val repeats = assignment.repeatCount.coerceIn(1, 8)
+        if (repeats > 1 && assignment.playMode != PlayMode.LOOP && buf.isNotEmpty()) {
+            val maxFrames = outRate * 30
+            val total = minOf(buf.size * repeats, maxFrames)
+            val out = FloatArray(total)
+            var written = 0
+            while (written < total) {
+                val n = minOf(buf.size, total - written)
+                buf.copyInto(out, written, 0, n)
+                written += n
+            }
+            buf = out
         }
         return buf
     }

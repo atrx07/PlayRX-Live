@@ -102,6 +102,45 @@ private fun seqState(): PlayRxState {
     )
 }
 
+private fun editState(): PlayRxState {
+    return PlayRxState(
+        chordText = "C major",
+        midiStatus = "PSR-SX700 connected via USB",
+        selectedPanel = "EDIT",
+        selectedPadSampleName = "CS-FDB-80-Drum Loop 01.wav",
+        samplePlayMode = "LOOP",
+        sampleTranspose = 0,
+        sampleSnapToTempo = true,
+        sampleOriginalBpm = 80f,
+        sampleOriginalKey = 10,
+        sampleQuantizeBeats = 4f,
+        sampleGain = 1.25f,
+        samplePan = -0.3f,
+        sampleFilterHz = 8000f,
+        sampleRepeat = 1,
+        sampleTrimStart = 0.1f,
+        sampleTrimEnd = 0.9f,
+        samplePeaks = List(64) { i -> (0.35f + 0.6f * kotlin.math.abs(kotlin.math.sin(i * 0.35))).coerceIn(0f, 1f) },
+    )
+}
+
+private fun samplesState(): PlayRxState {
+    return PlayRxState(
+        chordText = "C major",
+        midiStatus = "PSR-SX700 connected via USB",
+        selectedPanel = "SAMPLES",
+        samples = listOf("CS-FDB-80-Drum Loop 01.wav", "CS-FDB-80-Melody Loop 01-Bb.wav", "CS-FDB-80-Bass Loop 01.wav", "Kick One-Shot.wav"),
+        sampleCategories = listOf(
+            "CS-FDB-80-Drum Loop 01.wav" to "DRUM",
+            "CS-FDB-80-Melody Loop 01-Bb.wav" to "MELODY",
+            "CS-FDB-80-Bass Loop 01.wav" to "BASS",
+            "Kick One-Shot.wav" to "DRUM",
+        ),
+        samplesSearch = "80",
+        samplesCategory = "All",
+    )
+}
+
 private fun fxState(): PlayRxState {
     return PlayRxState(
         chordText = "C major",
@@ -241,6 +280,14 @@ class PhonePortraitScreenshotTest {
     @Test fun mixerEq() {
         paparazzi.snapshot { PlayRxScreen(mixerEqState(), isLandscape = false) }
     }
+
+    @Test fun editComplete() {
+        paparazzi.snapshot { PlayRxScreen(editState(), isLandscape = false) }
+    }
+
+    @Test fun samplesSearch() {
+        paparazzi.snapshot { PlayRxScreen(samplesState(), isLandscape = false) }
+    }
 }
 
 class PhoneLandscapeScreenshotTest {
@@ -288,6 +335,14 @@ class PhoneLandscapeScreenshotTest {
 
     @Test fun mixerEq() {
         paparazzi.snapshot { PlayRxScreen(mixerEqState(), isLandscape = true) }
+    }
+
+    @Test fun editComplete() {
+        paparazzi.snapshot { PlayRxScreen(editState(), isLandscape = true) }
+    }
+
+    @Test fun samplesSearch() {
+        paparazzi.snapshot { PlayRxScreen(samplesState(), isLandscape = true) }
     }
 }
 
@@ -337,6 +392,14 @@ class TabletPortraitScreenshotTest {
     @Test fun mixerEq() {
         paparazzi.snapshot { PlayRxScreen(mixerEqState(), isLandscape = false) }
     }
+
+    @Test fun editComplete() {
+        paparazzi.snapshot { PlayRxScreen(editState(), isLandscape = false) }
+    }
+
+    @Test fun samplesSearch() {
+        paparazzi.snapshot { PlayRxScreen(samplesState(), isLandscape = false) }
+    }
 }
 
 class TabletLandscapeScreenshotTest {
@@ -384,5 +447,13 @@ class TabletLandscapeScreenshotTest {
 
     @Test fun mixerEq() {
         paparazzi.snapshot { PlayRxScreen(mixerEqState(), isLandscape = true) }
+    }
+
+    @Test fun editComplete() {
+        paparazzi.snapshot { PlayRxScreen(editState(), isLandscape = true) }
+    }
+
+    @Test fun samplesSearch() {
+        paparazzi.snapshot { PlayRxScreen(samplesState(), isLandscape = true) }
     }
 }

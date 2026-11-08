@@ -257,8 +257,12 @@ class PlaybackEngine {
      * below so beat-repeat enable/disable can freeze its slice. */
     var fxState: FxState = FxState()
         private set
-    private val columnFilterY = FloatArray(8)
-    private var masterFilterY = 0f
+    // Per-column filter state, stereo (see the mixer: pan is real
+    // stereo since 2026-11-08, so each side has its own state).
+    private val columnFilterYL = FloatArray(8)
+    private val columnFilterYR = FloatArray(8)
+    private var masterFilterYL = 0f
+    private var masterFilterYR = 0f
     private val repeatBuf = FloatArray(SampleBank.SAMPLE_RATE * 10)
     private var repeatWritePos = 0
     private var repeatStartPos = 0
@@ -566,8 +570,18 @@ class PlaybackEngine {
         requestVoiceSwap()
     }
 
+    /** Unload one pad's sample (EDIT Unload): the pad returns to
+     * the built-in synth, its voices stop, and it leaves the loop
+     * and armed sets. The sample stays in the library. */
     fun clearImportedSample(pad: Int) {
+        if (!importedPads.containsKey(pad)) return
         importedPads.remove(pad)
+        voices.removeAll { it.sourcePad == pad }
+        gateVoices.remove(pad)
+        activeLoops.remove(pad)
+        pendingLoops.remove(pad)
+        songRecordStarts.remove(pad)
+        onLoopsChanged?.invoke(activeLoops.toSet())
     }
 
     /** Clear every pad using [sampleId] (delete-sample path):
@@ -691,6 +705,56 @@ class PlaybackEngine {
     /** Stop all voices belonging to one pad (GATE release). */
     fun releasePad(pad: Int) {
         voices.removeAll { it.sourcePad == pad }
+    }
+
+    /** Waveform peaks for the EDIT panel: the assigned sample's raw
+     * frames reduced to [buckets] peak-abs values (0..1). Empty
+     * when the pad has no sample (built-in synth has no waveform). */
+    fun samplePeaks(pad: Int, buckets: Int = 64): FloatArray {
+        val raw = importedPads[pad]?.raw ?: return FloatArray(0)
+        if (raw.isEmpty() || buckets <= 0) return FloatArray(0)
+        val out = FloatArray(buckets)
+        val per = raw.size.toDouble() / buckets
+        for (b in 0 until buckets) {
+            val start = (b * per).toInt()
+            val end = minOf(raw.size, ((b + 1) * per).toInt().coerceAtLeast(start + 1))
+            var peak = 0f
+            for (i in start until end) {
+                val v = kotlin.math.abs(raw[i])
+                if (v > peak) peak = v
+            }
+            out[b] = peak.coerceIn(0f, 1f)
+        }
+        return out
+    }
+
+    // GATE hold-to-play (2026-11-08): a GATE pad sounds only while
+    // held. pressGatePad starts a voice tracked here; releaseGatePad
+    // stops it. Taps through triggerPad still fire once (sequencer
+    // steps use that path), so a held pad and a sequenced GATE hit
+    // never share a voice.
+    private val gateVoices = mutableMapOf<Int, Voice>()
+
+    /** Pads currently sounding from a hold (test + UI state). */
+    fun activeGatePads(): Set<Int> = gateVoices.keys.toSet()
+
+    fun pressGatePad(pad: Int) {
+        val assignment = importedPads[pad]?.assignment
+        if (assignment?.playMode != PlayMode.GATE) return
+        if (gateVoices.containsKey(pad)) return
+        val vol = effectiveVolume(pad, 1f)
+        if (vol <= 0f) return
+        val imported = importedSampleFor(pad)
+        val voice = if (imported != null) Voice(imported, 0, vol, pad)
+            else Voice(sample(pad), 0, vol, pad)
+        gateVoices[pad] = voice
+        pending.add(voice)
+    }
+
+    fun releaseGatePad(pad: Int) {
+        val voice = gateVoices.remove(pad) ?: return
+        voices.remove(voice)
+        pending.remove(voice)
     }
 
     // Full-pad mixer: per-pad volume, mute, solo (48 pads) plus
@@ -1030,7 +1094,8 @@ class PlaybackEngine {
         // 4 s covers the longest division (2 beats) even at 60 BPM.
         val delayBuf = FloatArray(SampleBank.SAMPLE_RATE * 4)
         var delayPos = 0
-        val colSum = FloatArray(8)
+        val colSumL = FloatArray(8)
+        val colSumR = FloatArray(8)
 
         while (running) {
             // Drain pending one-shots into the voice list.
@@ -1145,9 +1210,13 @@ class PlaybackEngine {
                 voices.addAll(swapped)
             }
             for (frame in 0 until blockFrames) {
-                // Sum voices per column first: the per-column filter
-                // and the delay send both work on column sums.
-                java.util.Arrays.fill(colSum, 0f)
+                // Sum voices per column, stereo: the per-column
+                // filter and the delay send both work on column
+                // sums, and a pad's pan (PadSample.pan, resolved
+                // here so a pan edit reaches a voice already
+                // sounding) splits its signal left/right first.
+                java.util.Arrays.fill(colSumL, 0f)
+                java.util.Arrays.fill(colSumR, 0f)
                 val iter = voices.iterator()
                 while (iter.hasNext()) {
                     val v = iter.next()
@@ -1173,49 +1242,58 @@ class PlaybackEngine {
                         }
                     }
                     val s = v.sample[v.pos] * v.volume
-                    colSum[SampleBank.columnOf(v.sourcePad)] += s
+                    val (panL, panR) = FxMath.panGains(
+                        importedPads[v.sourcePad]?.assignment?.pan ?: 0f,
+                    )
+                    val col = SampleBank.columnOf(v.sourcePad)
+                    colSumL[col] += s * panL
+                    colSumR[col] += s * panR
                     v.pos++
                 }
                 // Per-column one-pole low-pass (Mixer "Eq Filter" tab),
                 // then the master sum; the delay eats a per-column
-                // send of the filtered signal.
-                var dry = 0f
+                // send of the filtered signal (mono sum of the sides).
+                var dryL = 0f
+                var dryR = 0f
                 var delayInput = 0f
                 for (c in 0..7) {
                     val cutoff = fxState.columnFilterCutoffHz[c]
-                    val filtered = if (cutoff <= 0f || cutoff >= 18000f) {
-                        colSum[c]
+                    val (filteredL, filteredR) = if (cutoff <= 0f || cutoff >= 18000f) {
+                        colSumL[c] to colSumR[c]
                     } else {
-                        columnFilterY[c] = FxMath.onePole(
-                            colSum[c], columnFilterY[c],
-                            FxMath.onePoleAlpha(cutoff, SampleBank.SAMPLE_RATE),
-                        )
-                        columnFilterY[c]
+                        val alpha = FxMath.onePoleAlpha(cutoff, SampleBank.SAMPLE_RATE)
+                        columnFilterYL[c] = FxMath.onePole(colSumL[c], columnFilterYL[c], alpha)
+                        columnFilterYR[c] = FxMath.onePole(colSumR[c], columnFilterYR[c], alpha)
+                        columnFilterYL[c] to columnFilterYR[c]
                     }
-                    dry += filtered
-                    delayInput += filtered * fxState.columnSends[c]
+                    dryL += filteredL
+                    dryR += filteredR
+                    delayInput += (filteredL + filteredR) * 0.5f * fxState.columnSends[c]
                 }
-                dry *= masterVolume
+                dryL *= masterVolume
+                dryR *= masterVolume
                 // Master filter (XY pad X): one-pole low-pass on the mix.
                 val masterCutoff = fxState.masterFilterCutoffHz
                 if (masterCutoff > 0f && masterCutoff < 18000f) {
-                    masterFilterY = FxMath.onePole(
-                        dry, masterFilterY,
-                        FxMath.onePoleAlpha(masterCutoff, SampleBank.SAMPLE_RATE),
-                    )
-                    dry = masterFilterY
+                    val alpha = FxMath.onePoleAlpha(masterCutoff, SampleBank.SAMPLE_RATE)
+                    masterFilterYL = FxMath.onePole(dryL, masterFilterYL, alpha)
+                    masterFilterYR = FxMath.onePole(dryR, masterFilterYR, alpha)
+                    dryL = masterFilterYL
+                    dryR = masterFilterYR
                 }
-                // Beat repeat: the dry mix is always recorded into
-                // the ring; while active, the output stutters the
-                // slice frozen at enable time.
-                repeatBuf[repeatWritePos] = dry
+                // Beat repeat: the dry mix (mono) is always recorded
+                // into the ring; while active, the output stutters
+                // the slice frozen at enable time, on both sides.
+                val dryMono = (dryL + dryR) * 0.5f
+                repeatBuf[repeatWritePos] = dryMono
                 repeatWritePos = (repeatWritePos + 1) % repeatBuf.size
                 if (repeatActive) {
                     val readPos = FxMath.repeatReadPos(
                         repeatWritePos, repeatStartPos, repeatLenFrames, repeatBuf.size,
                     )
                     val repeated = repeatBuf[readPos]
-                    dry = dry * (1f - fxState.beatRepeatMix) + repeated * fxState.beatRepeatMix
+                    dryL = dryL * (1f - fxState.beatRepeatMix) + repeated * fxState.beatRepeatMix
+                    dryR = dryR * (1f - fxState.beatRepeatMix) + repeated * fxState.beatRepeatMix
                 }
                 // Tempo-synced feedback delay on the master mix.
                 if (fxState.delayEnabled) {
@@ -1223,7 +1301,8 @@ class PlaybackEngine {
                         fxState.delayDivisionBeats, bpm, SampleBank.SAMPLE_RATE,
                     ).coerceIn(1, delayBuf.size - 1)
                     val delayed = delayBuf[delayPos]
-                    dry += delayed * fxState.delayMix
+                    dryL += delayed * fxState.delayMix
+                    dryR += delayed * fxState.delayMix
                     delayBuf[delayPos] =
                         delayInput * masterVolume + delayed * fxState.delayFeedback
                     delayPos = (delayPos + 1) % delaySamples
@@ -1233,23 +1312,26 @@ class PlaybackEngine {
                 // Soft clip (tanh) instead of a hard clamp: several
                 // loops + one-shots summing past 1.0 used to square
                 // off into harsh distortion. tanh rounds the top off.
-                val clamped = kotlin.math.tanh(dry.toDouble()).toFloat()
+                val clampedL = kotlin.math.tanh(dryL.toDouble()).toFloat()
+                val clampedR = kotlin.math.tanh(dryR.toDouble()).toFloat()
                 // Master Audio recording: capture exactly what the
                 // speakers get, mono. Capped at 5 minutes; the cap
                 // stops the capture.
                 if (masterRecording) {
+                    val mono = (clampedL + clampedR) * 0.5f
                     synchronized(captureLock) {
                         if (masterCapture.size < maxMasterFrames) {
-                            masterCapture.add(clamped)
+                            masterCapture.add(mono)
                         } else {
                             masterRecording = false
                             masterCaptureFull = true
                         }
                     }
                 }
-                val shortVal = (clamped * 32767).toInt().toShort()
-                outShorts[frame * 2] = shortVal
-                outShorts[frame * 2 + 1] = shortVal
+                val shortL = (clampedL * 32767).toInt().toShort()
+                val shortR = (clampedR * 32767).toInt().toShort()
+                outShorts[frame * 2] = shortL
+                outShorts[frame * 2 + 1] = shortR
             }
             at.write(outShorts, 0, outShorts.size)
         }

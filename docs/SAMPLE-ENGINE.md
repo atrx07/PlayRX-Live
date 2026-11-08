@@ -50,16 +50,15 @@ artwork is bundled, downloaded, or copied, even for testing.
   pad's column at assign time, not the pad selected at import.
   Re-rendering happens on every key change.
 - **Play modes:** LOOP (toggle, whole buffer loops as a voice
-  until toggled off), ONE_SHOT (fire once), GATE (stored;
-  PlaybackEngine.releasePad stops its voices — the UI tap
-  button treats GATE as ONE_SHOT for now, because a tap has no
-  release event; true hold-to-play needs pointer-release UI,
-  which is the next UI pass for GATE, not a faked behaviour).
-- **Per-pad:** gain, pan (stored; the v1 mixer is mono, so pan
-  is not yet audible — it is not claimed as live), one-pole
-  low-pass filter, reverse, fade in/out, quantize launch
-  (beats until next boundary, used by the transport in a
-  future pass).
+  until toggled off), ONE_SHOT (fire once), GATE (hold to play:
+  `pressGatePad` starts a voice, `releaseGatePad` stops it; the
+  pad renders as a press-aware surface, not a tap button).
+- **Per-pad:** gain, pan (real stereo since 2026-11-08 — the
+  mixer splits each voice left/right by `FxMath.panGains`),
+  one-pole low-pass filter, reverse, fade in/out, quantize launch,
+  repeat count (1..8 for ONE_SHOT / GATE; LOOP pads ignore it),
+  trim start/end frames, waveform peaks (64 buckets from the raw
+  frames, drawn in EDIT with trim markers).
 - **Pitch + tempo, honestly:** pitch-shift by resample, then
   tempo-stretch by OLA. That is not a phase vocoder and is not
   claimed as one. It is audible, testable, and keeps loop pads
@@ -67,12 +66,12 @@ artwork is bundled, downloaded, or copied, even for testing.
 
 ## What is NOT built yet (do not claim it)
 
-- Original BPM/key editing per sample after import (defaults
-  only, see above).
-- GATE hold-to-play UI (pointer release).
-- Stereo pan in the mixer (stored only).
-- Per-step sample controls, sample drag-and-drop between pads
-  (Assign button is the v1 route), Scale Keyboard melody
+- Original-key detection (BPM is auto-detected; key is manual).
+- Multi-pad slicing of one file, sample drag-and-drop between
+  pads (Assign button is the v1 route).
+- GATE holds do not record into the sequence (a held note has
+  no step duration yet); sequenced GATE hits fire once.
+- Per-step sample controls, Scale Keyboard melody
   loading, AI Remix / stem separation.
 - Sample slicing into multiple pads from one file (cut-to-grid
   slices one pad's start/end; multi-pad slicing is next).

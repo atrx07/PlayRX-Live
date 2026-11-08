@@ -37,6 +37,32 @@ class ProjectExportTest {
     }
 
     @Test
+    fun gatePad_pressAndRelease() {
+        val engine = PlaybackEngine()
+        val raw = SampleEngine.sineTone(440.0, 0.5)
+        val info = SampleInfo("g1", "gate.wav", "gate.wav", 44100, 1, 22050, 120f, 60, SampleCategory.DRUM)
+        engine.assignImportedSample(
+            0, raw,
+            PadSample(pad = 0, sampleId = "g1", playMode = PlayMode.GATE), info,
+        )
+        assertTrue(engine.activeGatePads().isEmpty())
+        engine.pressGatePad(0)
+        assertEquals(setOf(0), engine.activeGatePads())
+        engine.pressGatePad(0) // second press is a no-op
+        assertEquals(1, engine.activeGatePads().size)
+        engine.releaseGatePad(0)
+        assertTrue(engine.activeGatePads().isEmpty())
+        // A non-GATE pad ignores presses.
+        engine.pressGatePad(1)
+        assertTrue(engine.activeGatePads().isEmpty())
+        // Peaks: 64 buckets from the full-amplitude sine.
+        val peaks = engine.samplePeaks(0)
+        assertEquals(64, peaks.size)
+        assertTrue(peaks.all { it > 0.5f })
+        assertEquals(0, engine.samplePeaks(1).size)
+    }
+
+    @Test
     fun recordMode_masterShortCaptureReturnsNull() {
         val engine = PlaybackEngine()
         engine.setRecordMode(RecordMode.MASTER)
@@ -88,6 +114,7 @@ class ProjectExportTest {
         val assignment = PadSample(
             pad = 5, sampleId = "abc-1", playMode = PlayMode.LOOP,
             transposeSemitones = 3, snapToTempo = true, quantizeBeats = 4f,
+            repeatCount = 3,
         )
         val json = ProjectFile.padAssignmentToJson(5, "abc-1", assignment)
         val parsed = ProjectFile.padAssignmentFromJson(json)
@@ -97,6 +124,7 @@ class ProjectExportTest {
         assertEquals(PlayMode.LOOP, parsed.third.playMode)
         assertEquals(3, parsed.third.transposeSemitones)
         assertEquals(4f, parsed.third.quantizeBeats, 0.001f)
+        assertEquals(3, parsed.third.repeatCount)
         assertNull(ProjectFile.padAssignmentFromJson("{}"))
     }
 

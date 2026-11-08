@@ -392,4 +392,56 @@ class SampleEngineTest {
         assertNull(SampleEngine.parseWav(byteArrayOf(1, 2, 3, 4)))
         assertNull(SampleEngine.parseWav("not a wav file at all, far too short".toByteArray()))
     }
+
+    @Test
+    fun render_repeatDoublesOneShot_notLoop() {
+        val input = SampleEngine.sineTone(440.0, 0.5) // 22050 frames
+        val out = SampleEngine.renderPadSample(
+            input, assignment().copy(repeatCount = 2, snapToTempo = false),
+            info(), 120f, 0,
+        )
+        assertEquals(44100, out.size, 100)
+        // LOOP pads ignore repeat: they snap to whole bars instead.
+        val loop = SampleEngine.renderPadSample(
+            input, assignment().copy(playMode = PlayMode.LOOP, repeatCount = 3, snapToTempo = false),
+            info(), 120f, 0,
+        )
+        assertEquals(88200, loop.size, 3000)
+    }
+
+    @Test
+    fun render_gainHalvesPeak() {
+        val input = SampleEngine.sineTone(440.0, 0.5)
+        val peak = { b: FloatArray -> b.maxOf { abs(it) } }
+        val full = SampleEngine.renderPadSample(
+            input, assignment().copy(snapToTempo = false), info(), 120f, 0,
+        )
+        val half = SampleEngine.renderPadSample(
+            input, assignment().copy(gain = 0.5f, snapToTempo = false), info(), 120f, 0,
+        )
+        assertEquals(peak(full) * 0.5f, peak(half), 0.05f)
+    }
+
+    @Test
+    fun render_lowPassAttenuatesHighSine() {
+        val input = SampleEngine.sineTone(8000.0, 0.5)
+        val peak = { b: FloatArray -> b.maxOf { abs(it) } }
+        val open = SampleEngine.renderPadSample(
+            input, assignment().copy(snapToTempo = false), info(), 120f, 0,
+        )
+        val cut = SampleEngine.renderPadSample(
+            input, assignment().copy(filterCutoffHz = 500f, snapToTempo = false), info(), 120f, 0,
+        )
+        assertTrue("cut peak ${peak(cut)} should be < half of open ${peak(open)}", peak(cut) < peak(open) * 0.5f)
+    }
+
+    @Test
+    fun render_trimSlice() {
+        val input = SampleEngine.sineTone(440.0, 1.0)
+        val out = SampleEngine.renderPadSample(
+            input, assignment().copy(snapToTempo = false, startFrame = 11025, endFrame = 33075),
+            info(), 120f, 0,
+        )
+        assertEquals(22050, out.size, 100)
+    }
 }

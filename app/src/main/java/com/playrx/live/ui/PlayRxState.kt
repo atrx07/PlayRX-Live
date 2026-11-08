@@ -80,6 +80,26 @@ data class PlayRxState(
     /** Result of the last Detect-tempo run, shown in EDIT. */
     val sampleTempoDetectResult: String? = null,
     val sampleImportError: String? = null,
+    // ---- EDIT completeness (2026-11-08) ----
+    val sampleGain: Float = 1f,
+    /** -1 = left, 0 = centre, 1 = right (real stereo pan). */
+    val samplePan: Float = 0f,
+    /** Per-sample low-pass cutoff Hz; 20000 = fully open. */
+    val sampleFilterHz: Float = 20000f,
+    val sampleRepeat: Int = 1,
+    /** Trim as fractions of the sample (0..1). */
+    val sampleTrimStart: Float = 0f,
+    val sampleTrimEnd: Float = 1f,
+    /** Waveform peaks for the selected pad's sample (0..1). */
+    val samplePeaks: List<Float> = emptyList(),
+    /** Pads whose assigned sample plays in GATE mode (hold to play). */
+    val gatePads: Set<Int> = emptySet(),
+    // ---- SAMPLES collection (2026-11-08) ----
+    val samplesSearch: String = "",
+    /** "All" or a SampleCategory name. */
+    val samplesCategory: String = "All",
+    /** (name, category) for every sample in the collection. */
+    val sampleCategories: List<Pair<String, String>> = emptyList(),
     // ---- SEQ for real (2026-11-08) ----
     /** Sequence list: (id, name, step count). */
     val sequences: List<Triple<String, String, Int>> = listOf(Triple("seq-1", "Seq 1", 0)),
@@ -166,6 +186,18 @@ data class PlayRxActions(
     val onSampleOriginalKey: (Int) -> Unit = {},
     val onSampleQuantize: (Float) -> Unit = {},
     val onSampleDetectTempo: () -> Unit = {},
+    val onSampleGain: (Float) -> Unit = {},
+    val onSamplePan: (Float) -> Unit = {},
+    val onSampleFilter: (Float) -> Unit = {},
+    val onSampleRepeat: (Int) -> Unit = {},
+    val onSampleTrimStart: (Float) -> Unit = {},
+    val onSampleTrimEnd: (Float) -> Unit = {},
+    val onSampleUnload: () -> Unit = {},
+    val onSampleReplace: () -> Unit = {},
+    val onPadPress: (Int) -> Unit = {},
+    val onPadRelease: (Int) -> Unit = {},
+    val onSamplesSearch: (String) -> Unit = {},
+    val onSamplesCategory: (String) -> Unit = {},
     val onProjectSettingsToggle: () -> Unit = {},
     val onDefaultQuantize: (Float) -> Unit = {},
     val onDefaultSnapToggle: () -> Unit = {},

@@ -2,7 +2,9 @@ package com.playrx.live.ui
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
@@ -44,6 +46,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
@@ -190,6 +193,32 @@ private fun PadButton(state: PlayRxState, actions: PlayRxActions, pad: Int, modi
         isActiveLoop -> if (col == columnColor(2)) Color.Black else Color.White
         isSelected -> Color.White
         else -> col
+    }
+    // GATE pads (2026-11-08): hold to play. A press starts the
+    // voice, the release stops it — a tap never latches. The
+    // hold does not record into the sequence (a held note has no
+    // step duration yet); sequenced GATE hits fire once via the
+    // normal tap path.
+    if (state.gatePads.contains(pad)) {
+        Box(
+            contentAlignment = Alignment.Center,
+            modifier = modifier
+                .clip(RoundedCornerShape(12.dp))
+                .background(container)
+                .border(border, RoundedCornerShape(12.dp))
+                .pointerInput(pad) {
+                    detectTapGestures(
+                        onPress = {
+                            actions.onPadPress(pad)
+                            tryAwaitRelease()
+                            actions.onPadRelease(pad)
+                        },
+                    )
+                },
+        ) {
+            Text(SampleBank.PAD_NAMES[pad], fontSize = 9.sp, fontWeight = FontWeight.SemiBold, maxLines = 2, color = content)
+        }
+        return
     }
     Button(
         onClick = { (onPadClick ?: actions.onPadClick)(pad) },
@@ -632,7 +661,7 @@ private fun FxPanel(state: PlayRxState, actions: PlayRxActions) {
 }
 
 private fun formatCutoff(hz: Float): String = when {
-    hz <= 0f -> "Off"
+    hz <= 0f || hz >= 20000f -> "Off"
     hz >= 1000f -> "%.1f kHz".format(hz / 1000f)
     else -> "${hz.toInt()} Hz"
 }
@@ -643,6 +672,14 @@ private fun filterSliderToHz(t: Float): Float =
 
 private fun filterHzToSlider(hz: Float): Float =
     if (hz <= 0f) 0f else (ln(hz / 200f) / ln(90f)).coerceIn(0f, 1f)
+
+/** EDIT filter slider: same log curve, but the top is 20000 Hz =
+ * fully open (PadSample's default), shown as Off. */
+private fun editFilterSliderToHz(t: Float): Float =
+    if (t >= 0.98f) 20000f else (200f * kotlin.math.exp(t * ln(90f)))
+
+private fun editFilterHzToSlider(hz: Float): Float =
+    if (hz >= 20000f) 1f else (ln(hz / 200f) / ln(90f)).coerceIn(0f, 1f)
 
 @Composable
 private fun XyPad(state: PlayRxState, actions: PlayRxActions) {
@@ -680,6 +717,39 @@ private fun XyPad(state: PlayRxState, actions: PlayRxActions) {
         drawLine(AccentAmber, Offset(0f, py), Offset(size.width, py), strokeWidth = 2f)
         drawCircle(color = AccentAmber, radius = 14f, center = Offset(px, py))
         drawCircle(color = Color.Black, radius = 6f, center = Offset(px, py))
+    }
+}
+
+@Composable
+private fun WaveformView(state: PlayRxState) {
+    // EDIT waveform (2026-11-08): peak bars from the assigned
+    // sample's raw frames, with white trim markers. Built-in synth
+    // pads have no waveform to show.
+    val peaks = state.samplePeaks
+    Canvas(modifier = Modifier.fillMaxWidth().height(72.dp)) {
+        drawRect(color = DarkTab, size = size)
+        if (peaks.isNotEmpty()) {
+            val barW = size.width / peaks.size
+            for (i in peaks.indices) {
+                val h = (peaks[i] * size.height).coerceAtLeast(2f)
+                val top = (size.height - h) / 2f
+                drawRect(
+                    color = AccentAmber,
+                    topLeft = Offset(i * barW + 1f, top),
+                    size = Size((barW - 2f).coerceAtLeast(1f), h),
+                )
+            }
+            val sx = state.sampleTrimStart * size.width
+            val ex = state.sampleTrimEnd * size.width
+            drawLine(Color.White, Offset(sx, 0f), Offset(sx, size.height), strokeWidth = 2f)
+            drawLine(Color.White, Offset(ex, 0f), Offset(ex, size.height), strokeWidth = 2f)
+        }
+    }
+    if (peaks.isEmpty()) {
+        Text(
+            "No waveform — built-in synth, nothing imported on this pad.",
+            style = MaterialTheme.typography.bodySmall, color = TextDim,
+        )
     }
 }
 
@@ -901,6 +971,71 @@ private fun BottomPanel(state: PlayRxState, actions: PlayRxActions, modifier: Mo
                             ) { Text(label) }
                         }
                     }
+                    // Waveform + Gain / Pan / Filter / Repeat / Trim
+                    // (2026-11-08): the EDIT completeness slice. All
+                    // of these re-render the pad's sample through the
+                    // existing update path, so a change lands live on
+                    // a playing loop via the voice swap.
+                    Text("Waveform", color = TextMain)
+                    WaveformView(state)
+                    Text("Gain: ${(state.sampleGain * 100).toInt()}%", color = TextMain)
+                    Slider(
+                        value = state.sampleGain,
+                        onValueChange = actions.onSampleGain,
+                        valueRange = 0f..2f,
+                        colors = SliderDefaults.colors(thumbColor = Color.White, activeTrackColor = AccentAmber, inactiveTrackColor = DarkTab),
+                    )
+                    Text("Pan: ${if (state.samplePan == 0f) "Centre" else if (state.samplePan < 0f) "Left ${(-state.samplePan * 100).toInt()}%" else "Right ${(state.samplePan * 100).toInt()}%"}", color = TextMain)
+                    Slider(
+                        value = state.samplePan,
+                        onValueChange = actions.onSamplePan,
+                        valueRange = -1f..1f,
+                        colors = SliderDefaults.colors(thumbColor = Color.White, activeTrackColor = AccentAmber, inactiveTrackColor = DarkTab),
+                    )
+                    Text("Filter: ${formatCutoff(state.sampleFilterHz)}", color = TextMain)
+                    Slider(
+                        value = editFilterHzToSlider(state.sampleFilterHz),
+                        onValueChange = { actions.onSampleFilter(editFilterSliderToHz(it)) },
+                        valueRange = 0f..1f,
+                        colors = SliderDefaults.colors(thumbColor = Color.White, activeTrackColor = AccentAmber, inactiveTrackColor = DarkTab),
+                    )
+                    if (state.samplePlayMode != "LOOP") {
+                        Text("Repeat: ${state.sampleRepeat}x", color = TextMain)
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Button(
+                                onClick = { actions.onSampleRepeat((state.sampleRepeat - 1).coerceAtLeast(1)) },
+                                colors = ButtonDefaults.buttonColors(containerColor = DarkTab, contentColor = TextMain),
+                            ) { Text("−") }
+                            Text("${state.sampleRepeat}x", color = TextMain, modifier = Modifier.weight(1f))
+                            Button(
+                                onClick = { actions.onSampleRepeat((state.sampleRepeat + 1).coerceAtMost(8)) },
+                                colors = ButtonDefaults.buttonColors(containerColor = DarkTab, contentColor = TextMain),
+                            ) { Text("+") }
+                        }
+                    }
+                    Text("Trim: ${(state.sampleTrimStart * 100).toInt()}% – ${(state.sampleTrimEnd * 100).toInt()}%", color = TextMain)
+                    Slider(
+                        value = state.sampleTrimStart,
+                        onValueChange = { actions.onSampleTrimStart(it.coerceIn(0f, state.sampleTrimEnd - 0.01f)) },
+                        valueRange = 0f..1f,
+                        colors = SliderDefaults.colors(thumbColor = Color.White, activeTrackColor = AccentAmber, inactiveTrackColor = DarkTab),
+                    )
+                    Slider(
+                        value = state.sampleTrimEnd,
+                        onValueChange = { actions.onSampleTrimEnd(it.coerceIn(state.sampleTrimStart + 0.01f, 1f)) },
+                        valueRange = 0f..1f,
+                        colors = SliderDefaults.colors(thumbColor = Color.White, activeTrackColor = AccentAmber, inactiveTrackColor = DarkTab),
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(
+                            onClick = actions.onSampleUnload,
+                            colors = ButtonDefaults.buttonColors(containerColor = DarkTab, contentColor = Color(0xFFFF6B6B)),
+                        ) { Text("Unload") }
+                        Button(
+                            onClick = actions.onSampleReplace,
+                            colors = ButtonDefaults.buttonColors(containerColor = AccentAmber, contentColor = Color.Black),
+                        ) { Text("Replace…") }
+                    }
                 }
                 Text(
                     "Snap = tempo-stretch to project BPM, pitch kept. " +
@@ -929,10 +1064,84 @@ private fun BottomPanel(state: PlayRxState, actions: PlayRxActions, modifier: Mo
                 if (state.sampleImportError != null) {
                     Text(state.sampleImportError, style = MaterialTheme.typography.bodySmall, color = Color(0xFFFF6B6B))
                 }
-                if (state.samples.isEmpty()) {
-                    Text("No samples yet.", style = MaterialTheme.typography.bodySmall, color = TextDim)
+                // Search + category filter (2026-11-08): the
+                // collection grows past a flat list quickly.
+                TextField(
+                    value = state.samplesSearch,
+                    onValueChange = actions.onSamplesSearch,
+                    label = { Text("Search samples") },
+                    singleLine = true,
+                    colors = TextFieldDefaults.colors(
+                        focusedContainerColor = DarkTab,
+                        unfocusedContainerColor = DarkTab,
+                        focusedTextColor = TextMain,
+                        unfocusedTextColor = TextMain,
+                        focusedLabelColor = TextDim,
+                        unfocusedLabelColor = TextDim,
+                        cursorColor = AccentAmber,
+                    ),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.horizontalScroll(rememberScrollState())) {
+                    for (cat in listOf("All", "DRUM", "BASS", "MELODY", "PAD", "VOX", "FX")) {
+                        val sel = state.samplesCategory == cat
+                        Button(
+                            onClick = { actions.onSamplesCategory(cat) },
+                            contentPadding = PaddingValues(4.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = if (sel) AccentAmber else DarkTab,
+                                contentColor = if (sel) Color.Black else TextDim,
+                            ),
+                        ) { Text(cat, fontSize = 10.sp, maxLines = 1, softWrap = false) }
+                    }
+                }
+                val categoryOf = { name: String ->
+                    state.sampleCategories.firstOrNull { it.first == name }?.second ?: "OTHER"
+                }
+                val query = state.samplesSearch.trim()
+                val filtered = state.samples.filter { name ->
+                    (query.isEmpty() || name.contains(query, ignoreCase = true)) &&
+                        (state.samplesCategory == "All" || categoryOf(name) == state.samplesCategory)
+                }
+                // Suggested for the selected pad: same-category
+                // samples first — the closest thing to Remixlive's
+                // "replace this pad" recommendation without an AI
+                // model. Only shown when the pad has no sample yet
+                // or the list is unfiltered.
+                val padCategory = when (SampleBank.columnOf(state.selectedPad)) {
+                    0, 1, 2 -> "DRUM"
+                    3 -> "BASS"
+                    4 -> "MELODY"
+                    5 -> "PAD"
+                    6 -> "VOX"
+                    else -> "FX"
+                }
+                val suggested = filtered.filter { categoryOf(it) == padCategory }.take(3)
+                if (suggested.isNotEmpty() && query.isEmpty()) {
+                    Text(
+                        "Suggested for ${SampleBank.PAD_NAMES[state.selectedPad]} ($padCategory):",
+                        style = MaterialTheme.typography.bodySmall, color = TextDim,
+                    )
+                    for (name in suggested) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text(name, modifier = Modifier.weight(1f), color = TextMain, maxLines = 1)
+                            Button(
+                                onClick = { actions.onAssignSample(name) },
+                                contentPadding = PaddingValues(4.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = AccentAmber, contentColor = Color.Black),
+                            ) {
+                                Text("Assign")
+                            }
+                        }
+                    }
+                }
+                if (filtered.isEmpty()) {
+                    Text(
+                        if (state.samples.isEmpty()) "No samples yet." else "Nothing matches.",
+                        style = MaterialTheme.typography.bodySmall, color = TextDim,
+                    )
                 } else {
-                    for (name in state.samples) {
+                    for (name in filtered) {
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             Text(name, modifier = Modifier.weight(1f), color = TextMain, maxLines = 1)
                             Button(

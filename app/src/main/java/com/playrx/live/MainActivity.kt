@@ -60,10 +60,16 @@ class MainActivity : ComponentActivity() {
 
     private val importPicker = registerForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri == null) return@registerForActivityResult
+        // Replace… (EDIT): the import goes straight onto the pad
+        // it was launched from; a plain import just joins the
+        // library and waits for Assign.
+        val replacePad = pendingReplacePad
+        pendingReplacePad = null
+        val targetPad = replacePad ?: selectedPad
         Thread {
             val info = SampleStore.importUri(
                 this, uri, bpm, projectKeyMidi,
-                SampleStore.categoryForColumn(SampleBank.columnOf(selectedPad)),
+                SampleStore.categoryForColumn(SampleBank.columnOf(targetPad)),
             )
             mainHandler.post {
                 if (info == null) {
@@ -71,6 +77,22 @@ class MainActivity : ComponentActivity() {
                 } else {
                     sampleImportError = null
                     sampleList = SampleStore.loadManifest(this)
+                    if (replacePad != null) {
+                        val decoded = SampleStore.decodeStored(this, info)
+                        if (decoded != null) {
+                            val mode = if (SampleBank.isLoopPad(replacePad)) PlayMode.LOOP else PlayMode.ONE_SHOT
+                            val targetInfo = info.copy(
+                                category = SampleStore.categoryForColumn(SampleBank.columnOf(replacePad)),
+                            )
+                            engine.assignImportedSample(
+                                replacePad,
+                                decoded.frames,
+                                PadSample(pad = replacePad, sampleId = info.id, playMode = mode, quantizeBeats = if (mode == PlayMode.LOOP) defaultQuantizeBeats else 0f, snapToTempo = defaultSnapToTempo),
+                                targetInfo,
+                            )
+                            sampleTempoDetectResult = null
+                        }
+                    }
                     sampleVersion++
                 }
             }
@@ -129,6 +151,10 @@ class MainActivity : ComponentActivity() {
     private var columnSends by mutableStateOf(List(8) { 0.5f })
     private var columnFilters by mutableStateOf(List(8) { 0f })
     private var mixerTab by mutableStateOf("Volumes")
+    private var samplesSearch by mutableStateOf("")
+    private var samplesCategory by mutableStateOf("All")
+    /** EDIT Replace…: the pad the next import lands on, if any. */
+    private var pendingReplacePad: Int? = null
 
     private fun refreshProjectLists() {
         projects = ProjectStore.list(this).map { it.name to it.lastModified }
@@ -236,6 +262,29 @@ class MainActivity : ComponentActivity() {
             sampleOriginalKey = engine.importedSampleInfo(selectedPad)?.originalKeyMidi?.let { ((it % 12) + 12) % 12 } ?: projectKeyMidi,
             sampleQuantizeBeats = engine.importedAssignment(selectedPad)?.quantizeBeats ?: 4f,
             sampleImportError = sampleImportError,
+            sampleGain = engine.importedAssignment(selectedPad)?.gain ?: 1f,
+            samplePan = engine.importedAssignment(selectedPad)?.pan ?: 0f,
+            sampleFilterHz = engine.importedAssignment(selectedPad)?.filterCutoffHz ?: 20000f,
+            sampleRepeat = engine.importedAssignment(selectedPad)?.repeatCount ?: 1,
+            sampleTrimStart = run {
+                val a = engine.importedAssignment(selectedPad)
+                val info = engine.importedSampleInfo(selectedPad)
+                if (a == null || info == null || a.startFrame < 0 || info.frames <= 0) 0f
+                else (a.startFrame.toFloat() / info.frames).coerceIn(0f, 1f)
+            },
+            sampleTrimEnd = run {
+                val a = engine.importedAssignment(selectedPad)
+                val info = engine.importedSampleInfo(selectedPad)
+                if (a == null || info == null || a.endFrame < 0 || info.frames <= 0) 1f
+                else (a.endFrame.toFloat() / info.frames).coerceIn(0f, 1f)
+            },
+            samplePeaks = engine.samplePeaks(selectedPad).toList(),
+            gatePads = engine.importedPadIds().filter {
+                engine.importedAssignment(it)?.playMode == PlayMode.GATE
+            }.toSet(),
+            samplesSearch = samplesSearch,
+            samplesCategory = samplesCategory,
+            sampleCategories = sampleList.map { it.name to it.category.name },
             padVolumes = List(SampleBank.PAD_COUNT) { engine.getPadVolume(it) },
             padMuted = List(SampleBank.PAD_COUNT) { engine.isPadMuted(it) },
             padSolo = List(SampleBank.PAD_COUNT) { engine.isPadSolo(it) },
@@ -449,6 +498,67 @@ class MainActivity : ComponentActivity() {
             }
             sampleVersion++
         },
+        onSampleGain = { gain ->
+            val cur = engine.importedAssignment(selectedPad)
+            if (cur != null) {
+                engine.updateImportedAssignment(selectedPad, cur.copy(gain = gain.coerceIn(0f, 2f)))
+                sampleVersion++
+            }
+        },
+        onSamplePan = { pan ->
+            val cur = engine.importedAssignment(selectedPad)
+            if (cur != null) {
+                engine.updateImportedAssignment(selectedPad, cur.copy(pan = pan.coerceIn(-1f, 1f)))
+                sampleVersion++
+            }
+        },
+        onSampleFilter = { hz ->
+            val cur = engine.importedAssignment(selectedPad)
+            if (cur != null) {
+                engine.updateImportedAssignment(selectedPad, cur.copy(filterCutoffHz = hz.coerceIn(200f, 20000f)))
+                sampleVersion++
+            }
+        },
+        onSampleRepeat = { count ->
+            val cur = engine.importedAssignment(selectedPad)
+            if (cur != null) {
+                engine.updateImportedAssignment(selectedPad, cur.copy(repeatCount = count.coerceIn(1, 8)))
+                sampleVersion++
+            }
+        },
+        onSampleTrimStart = { fraction ->
+            val cur = engine.importedAssignment(selectedPad)
+            val info = engine.importedSampleInfo(selectedPad)
+            if (cur != null && info != null && info.frames > 0) {
+                val start = (fraction * info.frames).toInt().coerceIn(0, info.frames - 1)
+                engine.updateImportedAssignment(selectedPad, cur.copy(startFrame = start))
+                sampleVersion++
+            }
+        },
+        onSampleTrimEnd = { fraction ->
+            val cur = engine.importedAssignment(selectedPad)
+            val info = engine.importedSampleInfo(selectedPad)
+            if (cur != null && info != null && info.frames > 0) {
+                val end = (fraction * info.frames).toInt().coerceIn(1, info.frames)
+                engine.updateImportedAssignment(selectedPad, cur.copy(endFrame = end))
+                sampleVersion++
+            }
+        },
+        onSampleUnload = {
+            engine.clearImportedSample(selectedPad)
+            activeLoops = engine.activeLoopPads()
+            armedLoops = engine.armedLoopPads()
+            sampleTempoDetectResult = null
+            sampleVersion++
+        },
+        onSampleReplace = {
+            pendingReplacePad = selectedPad
+            importPicker.launch("audio/*")
+        },
+        onPadPress = { pad -> engine.pressGatePad(pad) },
+        onPadRelease = { pad -> engine.releaseGatePad(pad) },
+        onSamplesSearch = { samplesSearch = it },
+        onSamplesCategory = { samplesCategory = it },
         onProjectSettingsToggle = { showProjectSettings = !showProjectSettings },
         onDeleteSample = { name ->
             val info = sampleList.firstOrNull { it.name == name }

@@ -50,7 +50,7 @@ object ProjectFile {
             "\"start\":${a.startFrame},\"end\":${a.endFrame}," +
             "\"fadeIn\":${a.fadeInFrames},\"fadeOut\":${a.fadeOutFrames}," +
             "\"filter\":${a.filterCutoffHz},\"quantize\":${a.quantizeBeats}," +
-            "\"followKey\":${a.followProjectKey}}"
+            "\"followKey\":${a.followProjectKey},\"repeat\":${a.repeatCount}}"
     }
 
     fun padAssignmentFromJson(obj: String): Triple<Int, String, PadSample>? {
@@ -79,6 +79,7 @@ object ProjectFile {
             fadeOutFrames = intField("fadeOut", 0),
             filterCutoffHz = floatField("filter", 20000f),
             quantizeBeats = floatField("quantize", 0f),
+            repeatCount = intField("repeat", 1),
             followProjectKey = boolField("followKey", true),
         )
         return Triple(pad, sampleId, assignment)

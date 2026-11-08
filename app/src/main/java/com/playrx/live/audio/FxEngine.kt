@@ -104,4 +104,12 @@ object FxMath {
         val offset = ((writePos - start) % length + length) % length
         return (start + offset) % size
     }
+
+    /** Stereo balance gains for a pan in -1 (left) .. 1 (right).
+     * Centre stays at full level on both sides; hard left/right
+     * silences the other side. */
+    fun panGains(pan: Float): Pair<Float, Float> {
+        val p = pan.coerceIn(-1f, 1f)
+        return minOf(1f, 1f - p) to minOf(1f, 1f + p)
+    }
 }

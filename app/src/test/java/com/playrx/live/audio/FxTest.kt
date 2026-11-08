@@ -56,6 +56,16 @@ class FxTest {
     }
 
     @Test
+    fun panGains_centreAndExtremes() {
+        assertEquals(1f to 1f, FxMath.panGains(0f))
+        assertEquals(1f to 0f, FxMath.panGains(-1f))
+        assertEquals(0f to 1f, FxMath.panGains(1f))
+        val (l, r) = FxMath.panGains(-0.5f)
+        assertEquals(1f, l, 0.001f)
+        assertEquals(0.5f, r, 0.001f)
+    }
+
+    @Test
     fun fxState_columnSendAndFilterClamp() {
         val state = FxState()
         val sent = state.withColumnSend(3, 1.5f)
