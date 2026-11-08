@@ -97,6 +97,8 @@ class MainActivity : ComponentActivity() {
     private var sampleTempoDetectResult by mutableStateOf<String?>(null)
     private var selectedStep by mutableStateOf(-1)
     private var isRecording by mutableStateOf(false)
+    private var scaleName by mutableStateOf("Major")
+    private var scaleOctave by mutableStateOf(4)
 
     private fun currentState(): PlayRxState {
         // Read the version counters so pad/column/step edits recompose.
@@ -135,6 +137,8 @@ class MainActivity : ComponentActivity() {
             stepRoll = stepCell.roll,
             stepPitch = stepCell.pitchSemitones,
             isRecording = isRecording,
+            scaleName = scaleName,
+            scaleOctave = scaleOctave,
             activeLoops = activeLoops,
             armedLoops = armedLoops,
             selectedPad = selectedPad,
@@ -413,6 +417,22 @@ class MainActivity : ComponentActivity() {
         onRecordingToggle = {
             isRecording = !isRecording
             engine.isRecording = isRecording
+        },
+        onDrumPadClick = { pad ->
+            engine.triggerOneShot(pad)
+            selectedPad = pad
+            activeLoops = engine.activeLoopPads()
+            armedLoops = engine.armedLoopPads()
+            isPlaying = engine.isPlaying
+        },
+        onScaleSelect = { scale ->
+            if (scale in com.playrx.live.audio.ScaleKeyboard.SCALES) scaleName = scale
+        },
+        onScaleOctave = { delta ->
+            scaleOctave = (scaleOctave + delta).coerceIn(2, 6)
+        },
+        onScaleNote = { midi ->
+            engine.playNote(midi, pad = selectedPad)
         },
         onPadVolume = { pad, volume ->
             engine.setPadVolume(pad, volume)

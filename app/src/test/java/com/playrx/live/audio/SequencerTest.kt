@@ -132,6 +132,51 @@ class SequencerTest {
     }
 
     @Test
+    fun store_recordNoteStepPitch() {
+        val store = SequenceStore()
+        assertEquals(4, store.recordNoteStep(4, 1.0, 7))
+        val cell = store.selected()!!.cell(4, 4)
+        assertTrue(cell.on)
+        assertEquals(7, cell.pitchSemitones)
+        // Re-recording the same step keeps it on and updates pitch.
+        assertEquals(4, store.recordNoteStep(4, 1.0, -3))
+        assertEquals(-3, store.selected()!!.cell(4, 4).pitchSemitones)
+    }
+
+    @Test
+    fun scaleKeyboard_notesFollowProjectKey() {
+        // C major, octave 4: C4..B4, then C5..B5.
+        val notes = ScaleKeyboard.notes(0, "Major", 4)
+        assertEquals(60, notes.first().first)
+        assertEquals("C4", notes.first().second)
+        assertEquals(14, notes.size)
+        // F pentatonic root follows the key.
+        val minor = ScaleKeyboard.notes(5, "Pentatonic", 4)
+        assertEquals(65, minor.first().first) // F4
+        assertEquals("F4", minor.first().second)
+        assertEquals(10, minor.size)
+        // Chromatic has 24 notes over two octaves.
+        assertEquals(24, ScaleKeyboard.notes(0, "Chromatic", 4).size)
+        // Recorded pitch clamps to the step range.
+        assertEquals(12, ScaleKeyboard.recordedPitch(80))
+        assertEquals(-12, ScaleKeyboard.recordedPitch(40))
+        assertEquals(0, ScaleKeyboard.recordedPitch(60))
+    }
+
+    @Test
+    fun engine_playNoteRecordsWhenRecording() {
+        val engine = PlaybackEngine()
+        engine.isRecording = true
+        // G4 at totalBeats 0 -> step 0, pitch +7 from middle C.
+        engine.playNote(67, 0.9f, 4)
+        assertTrue(engine.getStep(4, 0))
+        assertEquals(7, engine.getStepCell(4, 0).pitchSemitones)
+        // A one-shot drum tap records too.
+        engine.triggerOneShot(0)
+        assertTrue(engine.getStep(0, 0))
+    }
+
+    @Test
     fun engine_stepCellRoundTripAndRecord() {
         val engine = PlaybackEngine()
         engine.setStepCell(0, 0, StepCell(on = true, velocity = 0.6f, pitchSemitones = -5))

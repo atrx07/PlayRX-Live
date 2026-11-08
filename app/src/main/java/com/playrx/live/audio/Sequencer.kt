@@ -224,6 +224,20 @@ class SequenceStore {
         return step
     }
 
+    /** Record a scale-keyboard note: like [recordTap], but the
+     * step's pitch is the note's offset from middle C, so the
+     * melody replays through the sequencer's pitch parameter. */
+    fun recordNoteStep(pad: Int, totalBeats: Double, pitchSemitones: Int): Int {
+        if (pad !in 0 until SampleBank.PAD_COUNT) return -1
+        val step = ((totalBeats * 4).toInt() % 16 + 16) % 16
+        val cur = selected() ?: return -1
+        val existing = cur.cell(pad, step)
+        val cell = if (existing.on) existing.copy(pitchSemitones = pitchSemitones)
+        else StepCell(on = true, pitchSemitones = pitchSemitones)
+        updateSelected { it.withCell(pad, step, cell) }
+        return step
+    }
+
     fun toJson(): String =
         "[" + sequences.joinToString(",") { it.toJson() } + "]"
 

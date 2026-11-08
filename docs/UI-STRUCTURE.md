@@ -57,9 +57,12 @@ the grid and hid Edit/Mixer below the fold. Never restore it.
 - **Drum** — same 8x6 area, one-shot pads for finger-drumming
   (MPC-style), icons show sound type. A Scale Keyboard expands
   at the bottom: drag to move octave/range, choose a scale, play
-  melodies live over the loops. PlayRX v1: Drum tab currently
-  shows only the 16-step sequencer for the selected drum pad;
-  the one-shot pad grid + Scale Keyboard are still to build.
+  melodies live over the loops. PlayRX (2026-11-08,
+  `docs/DRUM-SCALE.md`): **built** — one-shot grid (loops keep
+  playing underneath), Scale Keyboard with 6 scales, root follows
+  the project key, octave 2..6, two octaves of keys; scale taps
+  record into the sequence with their pitch when ● Rec is on.
+  No glissando / hold-to-sustain yet.
 - **Seq** — list of sequences, tap one + Edit for the step
   editor: rows are sounds, columns are steps/bars, tap to add,
   tap again to remove. A second tab gives per-step Velocity,

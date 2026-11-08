@@ -84,6 +84,11 @@ data class PlayRxState(
     val stepPitch: Int = 0,
     /** Drums & Sounds recording: pad taps quantize into the sequence. */
     val isRecording: Boolean = false,
+    // ---- DRUM Scale Keyboard (2026-11-08) ----
+    /** Scale flavour; root follows the project key. */
+    val scaleName: String = "Major",
+    /** MIDI octave of the keyboard's first note (2..6, C4 = 4). */
+    val scaleOctave: Int = 4,
 )
 
 /** Every user action the screen can trigger. No-ops by default for screenshots. */
@@ -134,4 +139,8 @@ data class PlayRxActions(
     val onStepCellRoll: (Int) -> Unit = {},
     val onStepCellPitch: (Int) -> Unit = {},
     val onRecordingToggle: () -> Unit = {},
+    val onDrumPadClick: (Int) -> Unit = {},
+    val onScaleSelect: (String) -> Unit = {},
+    val onScaleOctave: (Int) -> Unit = {},
+    val onScaleNote: (Int) -> Unit = {},
 )

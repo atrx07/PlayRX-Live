@@ -294,6 +294,48 @@ class PlaybackEngine {
         if (!isRecording) return -1
         return sequenceStore.recordTap(pad, beats)
     }
+
+    /** Record a scale-keyboard note into the selected sequence. */
+    fun recordNote(pad: Int, midi: Int, beats: Double = totalBeats): Int {
+        if (!isRecording) return -1
+        return sequenceStore.recordNoteStep(pad, beats, ScaleKeyboard.recordedPitch(midi))
+    }
+
+    /** Play a scale-keyboard note live (synth, not a pad sample).
+     * If recording, the note is also written into the selected
+     * sequence on [pad] (the selected pad, passed by the UI). */
+    private val noteCache = mutableMapOf<Int, FloatArray>()
+    fun playNote(midi: Int, velocity: Float = 0.9f, pad: Int = 0) {
+        if (midi !in 24..108) return
+        if (isRecording) recordNote(pad, midi)
+        val freq = ScaleKeyboard.frequency(midi)
+        val buffer = noteCache.getOrPut(midi) {
+            val n = (0.8 * SampleBank.SAMPLE_RATE).toInt()
+            val out = FloatArray(n)
+            for (i in out.indices) {
+                val t = i.toDouble() / SampleBank.SAMPLE_RATE
+                val v = sin(2 * PI * freq * t) +
+                    0.3 * sin(2 * PI * freq * 2 * t) +
+                    0.15 * sin(2 * PI * freq * 3 * t)
+                out[i] = (v * exp(-t * 3) * 0.7).toFloat()
+            }
+            out
+        }
+        pending.add(Voice(buffer, 0, velocity.coerceIn(0f, 1f), pad))
+    }
+
+    /** Drum View tap: fire a pad once, even if it is a loop pad.
+     * Loops keep playing underneath (Remixlive: loops keep playing
+     * when you switch to Drum). Records like any other tap. */
+    fun triggerOneShot(pad: Int) {
+        if (pad !in 0 until SampleBank.PAD_COUNT) return
+        if (isRecording) recordPadTap(pad)
+        val vol = effectiveVolume(pad, 1f)
+        if (vol <= 0f) return
+        val imported = importedSampleFor(pad)
+        if (imported != null) pending.add(Voice(imported, 0, vol, pad))
+        else pending.add(Voice(sample(pad), 0, vol, pad))
+    }
     private val activeLoops = mutableSetOf<Int>()
     // Loop pads tapped while the transport is running, waiting for
     // their quantize boundary (default: next bar). They are NOT in

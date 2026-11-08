@@ -52,8 +52,9 @@ private fun playingState(): PlayRxState = PlayRxState(
 )
 
 private fun drumState(): PlayRxState {
+    // DRUM tab: one-shot grid + Scale Keyboard (F minor, octave 4),
+    // loops still playing underneath.
     val steps = List(48) { List(16) { false } }.toMutableList()
-    // Kick 1 (pad 0): 4-on-the-floor.
     steps[0] = listOf(true, false, false, false, true, false, false, false, true, false, false, false, true, false, false, false)
     return PlayRxState(
         chordText = "C major",
@@ -63,7 +64,11 @@ private fun drumState(): PlayRxState {
         currentStep = 4,
         selectedPad = 0,
         selectedTab = "DRUM",
-        selectedPanel = "SAMPLES",
+        selectedPanel = "MIXER",
+        projectKeyMidi = 5,
+        scaleName = "Minor",
+        scaleOctave = 4,
+        activeLoops = setOf(5),
         samples = listOf("my-kick.wav", "bass-loop.wav"),
         steps = steps,
     )
@@ -140,7 +145,7 @@ class PhonePortraitScreenshotTest {
         paparazzi.snapshot { PlayRxScreen(playingState(), isLandscape = false) }
     }
 
-    @Test fun drumSequencer() {
+    @Test fun drumScale() {
         paparazzi.snapshot { PlayRxScreen(drumState(), isLandscape = false) }
     }
 
@@ -172,7 +177,7 @@ class PhoneLandscapeScreenshotTest {
         paparazzi.snapshot { PlayRxScreen(playingState(), isLandscape = true) }
     }
 
-    @Test fun drumSequencer() {
+    @Test fun drumScale() {
         paparazzi.snapshot { PlayRxScreen(drumState(), isLandscape = true) }
     }
 
@@ -204,7 +209,7 @@ class TabletPortraitScreenshotTest {
         paparazzi.snapshot { PlayRxScreen(playingState(), isLandscape = false) }
     }
 
-    @Test fun drumSequencer() {
+    @Test fun drumScale() {
         paparazzi.snapshot { PlayRxScreen(drumState(), isLandscape = false) }
     }
 
@@ -236,7 +241,7 @@ class TabletLandscapeScreenshotTest {
         paparazzi.snapshot { PlayRxScreen(playingState(), isLandscape = true) }
     }
 
-    @Test fun drumSequencer() {
+    @Test fun drumScale() {
         paparazzi.snapshot { PlayRxScreen(drumState(), isLandscape = true) }
     }
 

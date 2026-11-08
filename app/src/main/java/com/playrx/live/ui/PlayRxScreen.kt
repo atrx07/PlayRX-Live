@@ -44,6 +44,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.playrx.live.audio.SampleBank
+import com.playrx.live.audio.ScaleKeyboard
 
 /**
  * The PlayRX screen as standalone composables, driven only by
@@ -138,7 +139,7 @@ private fun columnColor(col: Int): Color = when (col) {
 }
 
 @Composable
-private fun PadButton(state: PlayRxState, actions: PlayRxActions, pad: Int, modifier: Modifier = Modifier) {
+private fun PadButton(state: PlayRxState, actions: PlayRxActions, pad: Int, modifier: Modifier = Modifier, onPadClick: ((Int) -> Unit)? = null) {
     val isActiveLoop = state.activeLoops.contains(pad)
     val isArmed = state.armedLoops.contains(pad)
     val isSelected = state.selectedPad == pad
@@ -172,7 +173,7 @@ private fun PadButton(state: PlayRxState, actions: PlayRxActions, pad: Int, modi
         else -> col
     }
     Button(
-        onClick = { actions.onPadClick(pad) },
+        onClick = { (onPadClick ?: actions.onPadClick)(pad) },
         shape = RoundedCornerShape(12.dp),
         contentPadding = PaddingValues(2.dp),
         border = border,
@@ -187,7 +188,7 @@ private fun PadButton(state: PlayRxState, actions: PlayRxActions, pad: Int, modi
 }
 
 @Composable
-private fun PadGridRows(state: PlayRxState, actions: PlayRxActions, columns: Int, modifier: Modifier = Modifier) {
+private fun PadGridRows(state: PlayRxState, actions: PlayRxActions, columns: Int, modifier: Modifier = Modifier, onPadClick: ((Int) -> Unit)? = null) {
     val rows = (SampleBank.PAD_COUNT + columns - 1) / columns
     Column(verticalArrangement = Arrangement.spacedBy(6.dp), modifier = modifier) {
         for (row in 0 until rows) {
@@ -195,7 +196,7 @@ private fun PadGridRows(state: PlayRxState, actions: PlayRxActions, columns: Int
                 for (col in 0 until columns) {
                     val pad = row * columns + col
                     if (pad < SampleBank.PAD_COUNT) {
-                        PadButton(state, actions, pad, Modifier.weight(1f).aspectRatio(1f))
+                        PadButton(state, actions, pad, Modifier.weight(1f).aspectRatio(1f), onPadClick)
                     }
                 }
             }
@@ -210,6 +211,7 @@ private fun PadGrid(
     columns: Int,
     padHeight: androidx.compose.ui.unit.Dp,
     modifier: Modifier = Modifier,
+    onPadClick: ((Int) -> Unit)? = null,
 ) {
     LazyVerticalGrid(
         columns = GridCells.Fixed(columns),
@@ -218,7 +220,7 @@ private fun PadGrid(
         modifier = modifier,
     ) {
         items(SampleBank.PAD_COUNT) { pad ->
-            PadButton(state, actions, pad, Modifier.height(padHeight))
+            PadButton(state, actions, pad, Modifier.height(padHeight), onPadClick)
         }
     }
 }
@@ -695,6 +697,67 @@ private fun PadEditPanel(state: PlayRxState, actions: PlayRxActions) {
 }
 
 @Composable
+private fun ScaleKeyboardView(state: PlayRxState, actions: PlayRxActions, modifier: Modifier = Modifier) {
+    // Scale Keyboard (2026-11-08): the expandable keyboard at the
+    // bottom of Drum View. Root follows the project key, so the keys
+    // are always in key; scale flavour and octave are the player's
+    // choice. Notes play live over the loops, and with ● Rec on in
+    // SEQ they quantize into the sequence with their pitch.
+    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(
+            "Scale keyboard — root ${pitchName(state.projectKeyMidi)} (project key)",
+            color = TextMain,
+        )
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            modifier = Modifier.horizontalScroll(rememberScrollState()),
+        ) {
+            for (scale in ScaleKeyboard.SCALES) {
+                val sel = state.scaleName == scale
+                Button(
+                    onClick = { actions.onScaleSelect(scale) },
+                    contentPadding = PaddingValues(4.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (sel) AccentAmber else DarkTab,
+                        contentColor = if (sel) Color.Black else TextMain,
+                    ),
+                ) { Text(scale, fontSize = 11.sp, maxLines = 1, softWrap = false) }
+            }
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(
+                onClick = { actions.onScaleOctave(-1) },
+                colors = ButtonDefaults.buttonColors(containerColor = DarkTab, contentColor = TextMain),
+            ) { Text("Oct −") }
+            Text(
+                "Octave ${state.scaleOctave}", color = TextMain,
+                modifier = Modifier.weight(1f),
+            )
+            Button(
+                onClick = { actions.onScaleOctave(1) },
+                colors = ButtonDefaults.buttonColors(containerColor = DarkTab, contentColor = TextMain),
+            ) { Text("Oct +") }
+        }
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            modifier = Modifier.horizontalScroll(rememberScrollState()),
+        ) {
+            for ((midi, name) in ScaleKeyboard.notes(state.projectKeyMidi, state.scaleName, state.scaleOctave)) {
+                Button(
+                    onClick = { actions.onScaleNote(midi) },
+                    contentPadding = PaddingValues(6.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color.White, contentColor = Color.Black),
+                ) { Text(name, fontSize = 11.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false) }
+            }
+        }
+        Text(
+            "Play melodies live over the loops. With ● Rec on (SEQ tab), taps quantize into the sequence.",
+            style = MaterialTheme.typography.bodySmall, color = TextDim,
+        )
+    }
+}
+
+@Composable
 private fun SequencerRow(state: PlayRxState, actions: PlayRxActions) {
     Text(
         "Sequencer — ${SampleBank.PAD_NAMES[state.selectedPad]} (tap Edit pattern, pick a drum pad, then toggle steps)",
@@ -939,7 +1002,16 @@ private fun PortraitContent(state: PlayRxState, actions: PlayRxActions) {
         } else if (state.selectedTab == "SEQ") {
             SeqView(state, actions)
         } else if (state.selectedTab == "DRUM") {
-            SequencerRow(state, actions)
+            Text(
+                "Drum — one-shots over the loops. Loops keep playing when you switch here.",
+                style = MaterialTheme.typography.bodySmall, color = TextDim,
+            )
+            PadGridRows(
+                state, actions, columns = 4,
+                onPadClick = actions.onDrumPadClick,
+                modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+            )
+            ScaleKeyboardView(state, actions, modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp))
         } else {
             PlaceholderTab(state)
         }
@@ -1003,11 +1075,33 @@ private fun LandscapeContent(state: PlayRxState, actions: PlayRxActions) {
                 style = MaterialTheme.typography.bodySmall, color = TextDim,
             )
         } else if (state.selectedTab == "DRUM") {
-            SequencerRow(state, actions)
-            PanelSwitch(state, actions)
-            BottomPanel(
-                state, actions,
-                modifier = Modifier.fillMaxWidth().height(170.dp).verticalScroll(rememberScrollState()).padding(vertical = 8.dp),
+            // Drum grid left (one-shots, even on loop columns),
+            // Scale Keyboard below it, ONE switchable panel right —
+            // the same right-panel layout as LOOP.
+            Row(modifier = Modifier.weight(1f).fillMaxWidth().padding(vertical = 8.dp)) {
+                Column(modifier = Modifier.weight(1f).fillMaxHeight().padding(end = 12.dp)) {
+                    BoxWithConstraints(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                        val rows = 6
+                        val spacing = 6.dp
+                        val padHeight = (maxHeight - spacing * (rows - 1)) / rows
+                        PadGrid(
+                            state, actions, columns = 8, padHeight = padHeight,
+                            modifier = Modifier.fillMaxSize(),
+                            onPadClick = actions.onDrumPadClick,
+                        )
+                    }
+                    ScaleKeyboardView(state, actions, modifier = Modifier.fillMaxWidth().padding(top = 8.dp))
+                }
+                Column(
+                    modifier = Modifier.width(260.dp).fillMaxHeight().verticalScroll(rememberScrollState()),
+                ) {
+                    PanelSwitch(state, actions)
+                    BottomPanel(state, actions, modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp))
+                }
+            }
+            Text(
+                "Drum — one-shots over the loops. Loops keep playing when you switch here.",
+                style = MaterialTheme.typography.bodySmall, color = TextDim,
             )
         } else if (state.selectedTab == "SEQ") {
             Column(
