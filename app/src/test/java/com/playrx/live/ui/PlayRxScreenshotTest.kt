@@ -102,6 +102,19 @@ private fun seqState(): PlayRxState {
     )
 }
 
+private fun projectsState(): PlayRxState {
+    return PlayRxState(
+        chordText = "C major",
+        midiStatus = "PSR-SX700 connected via USB",
+        showProjects = true,
+        projects = listOf("My Song" to 1762620000000L, "Verse idea" to 1762533600000L),
+        newProjectName = "Chorus",
+        recordMode = "OFF",
+        recordings = listOf("master-20261108-203000.wav"),
+        projectMessage = "Saved My Song",
+    )
+}
+
 private fun songState(): PlayRxState {
     val clips = listOf(
         com.playrx.live.audio.SongClip("clip-1", 5, 1, 4, 5, "Pad 1"),
@@ -190,6 +203,10 @@ class PhonePortraitScreenshotTest {
     @Test fun songTimeline() {
         paparazzi.snapshot { PlayRxScreen(songState(), isLandscape = false) }
     }
+
+    @Test fun projectsOverlay() {
+        paparazzi.snapshot { PlayRxScreen(projectsState(), isLandscape = false) }
+    }
 }
 
 class PhoneLandscapeScreenshotTest {
@@ -225,6 +242,10 @@ class PhoneLandscapeScreenshotTest {
 
     @Test fun songTimeline() {
         paparazzi.snapshot { PlayRxScreen(songState(), isLandscape = true) }
+    }
+
+    @Test fun projectsOverlay() {
+        paparazzi.snapshot { PlayRxScreen(projectsState(), isLandscape = true) }
     }
 }
 
@@ -262,6 +283,10 @@ class TabletPortraitScreenshotTest {
     @Test fun songTimeline() {
         paparazzi.snapshot { PlayRxScreen(songState(), isLandscape = false) }
     }
+
+    @Test fun projectsOverlay() {
+        paparazzi.snapshot { PlayRxScreen(projectsState(), isLandscape = false) }
+    }
 }
 
 class TabletLandscapeScreenshotTest {
@@ -297,5 +322,9 @@ class TabletLandscapeScreenshotTest {
 
     @Test fun songTimeline() {
         paparazzi.snapshot { PlayRxScreen(songState(), isLandscape = true) }
+    }
+
+    @Test fun projectsOverlay() {
+        paparazzi.snapshot { PlayRxScreen(projectsState(), isLandscape = true) }
     }
 }

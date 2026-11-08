@@ -325,11 +325,79 @@ class PlaybackEngine {
     }
     var isRecording: Boolean = false
 
+    // Recording modes (2026-11-08, Projects slice): the Rec dropdown.
+    // DRUMS is the old isRecording path (pad taps -> sequence).
+    // SONG captures loop taps as timeline clips. MASTER captures
+    // the live mix to a WAV (see finishMasterRecording).
+    var recordMode: RecordMode = RecordMode.OFF
+        private set
+    private var songRecordStarts = mutableMapOf<Int, Int>()
+    private val masterCapture = mutableListOf<Float>()
+    private val captureLock = Any()
+    /** Max master capture: 5 minutes of mono 44.1kHz (~53 MB). */
+    private val maxMasterFrames = 44100 * 60 * 5
+    var masterRecording: Boolean = false
+        private set
+    /** The 5-minute capture cap was hit; recording stopped itself. */
+    var masterCaptureFull: Boolean = false
+        private set
+
+    fun setRecordMode(mode: RecordMode) {
+        if (recordMode == mode) return
+        if (recordMode == RecordMode.SONG) closeSongRecordClips()
+        recordMode = mode
+        isRecording = (mode == RecordMode.DRUMS)
+        if (mode == RecordMode.MASTER) {
+            synchronized(captureLock) { masterCapture.clear() }
+            masterCaptureFull = false
+            masterRecording = true
+        } else {
+            masterRecording = false
+        }
+    }
+
+    /** Stop a master capture and hand the samples to the caller
+     * (null when nothing worth saving was captured, under 0.1 s).
+     * The caller writes the WAV; the engine keeps no copy. */
+    fun finishMasterRecording(): FloatArray? {
+        masterRecording = false
+        val out = synchronized(captureLock) {
+            val copy = masterCapture.toFloatArray()
+            masterCapture.clear()
+            copy
+        }
+        if (out.size < 4410) return null
+        return out
+    }
+
+    private fun rawBarNow(): Int = (totalBeats / 4).toInt() + 1
+
+    /** Close one open SONG-record clip: the loop ran from its start
+     * bar to the current bar (at least 1 bar). Overlaps are refused
+     * by addClip and dropped silently. */
+    private fun closeSongRecordClip(pad: Int) {
+        val startRaw = songRecordStarts.remove(pad) ?: return
+        val lenBars = songTimeline.lengthBars.coerceAtLeast(1)
+        val startBar = ((startRaw - 1) % lenBars) + 1
+        val length = (rawBarNow() - startRaw + 1).coerceIn(1, lenBars - startBar + 1)
+        songTimeline.addClip(SampleBank.columnOf(pad), startBar, length, pad, SampleBank.PAD_NAMES[pad])
+    }
+
+    private fun closeSongRecordClips() {
+        for (pad in songRecordStarts.keys.toList()) closeSongRecordClip(pad)
+    }
+
+    /** Pads with imported samples: pad -> (sampleId, assignment).
+     * Projects persist this; the sample files stay in SampleStore. */
+    fun importedPadAssignments(): Map<Int, Pair<String, PadSample>> =
+        importedPads.mapValues { (_, v) -> v.info.id to v.assignment }
+
     fun sequences(): List<Sequence> = sequenceStore.list()
     fun selectedSequence(): Sequence? = sequenceStore.selected()
     fun createSequence(): Sequence = sequenceStore.create()
     fun deleteSequence(id: String): Boolean = sequenceStore.delete(id)
     fun selectSequence(id: String): Boolean = sequenceStore.select(id)
+    fun renameSequence(id: String, name: String): Boolean = sequenceStore.rename(id, name)
     fun renameSequence(id: String, name: String): Boolean = sequenceStore.rename(id, name)
     fun setSequenceLoop(loop: Boolean) {
         sequenceStore.updateSelected { it.copy(loop = loop) }
@@ -721,6 +789,9 @@ class PlaybackEngine {
     }
 
     fun stopAll() {
+        // Stopping closes any open SONG-record clips at this bar,
+        // before totalBeats resets to 0 below.
+        if (recordMode == RecordMode.SONG) closeSongRecordClips()
         voices.clear()
         delayedVoices.clear()
         songActivePads.clear()
@@ -770,11 +841,13 @@ class PlaybackEngine {
                 activeLoops.remove(pad)
                 // Stop any still-playing voice of this loop pad.
                 voices.removeAll { it.sourcePad == pad }
+                // SONG recording: stopping the loop closes its clip.
+                if (recordMode == RecordMode.SONG) closeSongRecordClip(pad)
                 onLoopsChanged?.invoke(activeLoops.toSet())
             } else {
                 val quantize = assignment?.quantizeBeats ?: 4f
                 if (!isPlaying || quantize <= 0f) {
-                    startLoopPad(pad, imported)
+                    startLoopPad(pad, imported, userInitiated = true)
                 } else {
                     // Next boundary strictly after now: if the tap
                     // lands exactly on a bar, start at once; otherwise
@@ -783,7 +856,7 @@ class PlaybackEngine {
                     val q = quantize.toDouble()
                     val boundary = kotlin.math.ceil(totalBeats / q) * q
                     if (boundary <= totalBeats + 1e-6) {
-                        startLoopPad(pad, imported)
+                        startLoopPad(pad, imported, userInitiated = true)
                     } else {
                         pendingLoops[pad] = boundary
                         onLoopsChanged?.invoke(activeLoops.toSet())
@@ -791,6 +864,15 @@ class PlaybackEngine {
                 }
             }
         } else {
+            // SONG recording: a one-shot tap becomes a 1-bar clip
+            // that fires once at its start bar on playback.
+            if (recordMode == RecordMode.SONG) {
+                val lenBars = songTimeline.lengthBars.coerceAtLeast(1)
+                val startBar = ((rawBarNow() - 1) % lenBars) + 1
+                songTimeline.addClip(
+                    SampleBank.columnOf(pad), startBar, 1, pad, SampleBank.PAD_NAMES[pad],
+                )
+            }
             val vol = effectiveVolume(pad, 1f)
             if (vol > 0f) {
                 if (imported != null) pending.add(Voice(imported, 0, vol, pad))
@@ -799,8 +881,15 @@ class PlaybackEngine {
         }
     }
 
-    private fun startLoopPad(pad: Int, imported: FloatArray?) {
+    private fun startLoopPad(pad: Int, imported: FloatArray?, userInitiated: Boolean = false) {
         activeLoops.add(pad)
+        // SONG recording: a loop the player starts becomes a clip
+        // from this bar until the player stops it. Song-driven
+        // starts (updateSongClips) are NOT recorded — they are the
+        // timeline playing back, not a performance to capture.
+        if (userInitiated && recordMode == RecordMode.SONG && pad !in songRecordStarts) {
+            songRecordStarts[pad] = rawBarNow()
+        }
         if (!isPlaying) isPlaying = true
         // Loop pads with imported samples are voiced by the mixer;
         // synth loop pads use their 16-step pattern there. Imported
@@ -893,7 +982,7 @@ class PlaybackEngine {
                 val due = pendingLoops.filter { it.value <= totalBeats + 1e-9 }.keys.toList()
                 for (pad in due) {
                     pendingLoops.remove(pad)
-                    startLoopPad(pad, importedSampleFor(pad))
+                    startLoopPad(pad, importedSampleFor(pad), userInitiated = true)
                 }
                 val step = ((totalBeats * 4).toInt() % 16 + 16) % 16
                 if (step != lastStep) {
@@ -1036,6 +1125,19 @@ class PlaybackEngine {
                 // loops + one-shots summing past 1.0 used to square
                 // off into harsh distortion. tanh rounds the top off.
                 val clamped = kotlin.math.tanh(dry.toDouble()).toFloat()
+                // Master Audio recording: capture exactly what the
+                // speakers get, mono. Capped at 5 minutes; the cap
+                // stops the capture.
+                if (masterRecording) {
+                    synchronized(captureLock) {
+                        if (masterCapture.size < maxMasterFrames) {
+                            masterCapture.add(clamped)
+                        } else {
+                            masterRecording = false
+                            masterCaptureFull = true
+                        }
+                    }
+                }
                 val shortVal = (clamped * 32767).toInt().toShort()
                 outShorts[frame * 2] = shortVal
                 outShorts[frame * 2 + 1] = shortVal

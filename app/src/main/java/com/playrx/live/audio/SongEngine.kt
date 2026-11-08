@@ -116,6 +116,14 @@ class SongTimeline(
         return addClip(clip.track, bar, rightLen, clip.pad, clip.name)
     }
 
+    /** Replace this timeline's contents with [other]'s (project load). */
+    fun loadFrom(other: SongTimeline) {
+        lengthBars = other.lengthBars
+        clips.clear()
+        clips.addAll(other.list())
+        nextNumber = (clips.mapNotNull { it.id.removePrefix("clip-").toIntOrNull() }.maxOrNull() ?: 0) + 1
+    }
+
     fun clear() {
         clips.clear()
     }

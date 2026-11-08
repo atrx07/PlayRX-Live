@@ -22,14 +22,22 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
+import androidx.compose.material3.TextField
+import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Box
@@ -119,6 +127,9 @@ fun PlayRxScreen(
             }
             if (state.showProjectSettings) {
                 ProjectSettingsOverlay(state, actions)
+            }
+            if (state.showProjects) {
+                ProjectsOverlay(state, actions)
             }
         }
     }
@@ -324,6 +335,136 @@ private fun ProjectSettingsOverlay(state: PlayRxState, actions: PlayRxActions) {
                     "These project settings are the defaults a new assignment starts from.",
                 style = MaterialTheme.typography.bodySmall, color = TextDim,
             )
+        }
+    }
+}
+
+@Composable
+private fun RecMenuButton(state: PlayRxState, actions: PlayRxActions) {
+    // Top-right Rec dropdown (2026-11-08): Song (loops/sequences
+    // to the timeline), Drums & Sounds (to a sequence), Master
+    // Audio (the live mix to a WAV). Off stops the mode; leaving
+    // Master Audio saves the WAV.
+    var expanded by remember { mutableStateOf(false) }
+    Box {
+        Button(
+            onClick = { expanded = true },
+            shape = RoundedCornerShape(20.dp),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = if (state.recordMode == "OFF") DarkTab else Color(0xFFD32F2F),
+                contentColor = if (state.recordMode == "OFF") TextMain else Color.White,
+            ),
+        ) {
+            Text(if (state.recordMode == "OFF") "● Rec" else "● ${state.recordMode}", fontSize = 12.sp, maxLines = 1, softWrap = false)
+        }
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            for ((label, mode) in listOf(
+                "Off" to "OFF",
+                "Song — loops to the timeline" to "SONG",
+                "Drums & Sounds — to a sequence" to "DRUMS",
+                "Master Audio — mix to WAV" to "MASTER",
+            )) {
+                DropdownMenuItem(
+                    text = { Text(label) },
+                    onClick = {
+                        expanded = false
+                        actions.onRecordMode(mode)
+                    },
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ProjectsOverlay(state: PlayRxState, actions: PlayRxActions) {
+    // Projects + Live Set (2026-11-08): the home-screen set of
+    // projects, newest first, plus the Master Audio recordings.
+    Surface(color = DarkBg, modifier = Modifier.fillMaxSize()) {
+        Column(
+            modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Projects — Live Set", style = MaterialTheme.typography.titleLarge, color = TextMain, modifier = Modifier.weight(1f))
+                Button(
+                    onClick = actions.onProjectsToggle,
+                    colors = ButtonDefaults.buttonColors(containerColor = AccentAmber, contentColor = Color.Black),
+                ) { Text("Done") }
+            }
+            Text(
+                "Save the whole project: tempo, key, sequences, song timeline, sample assignments. " +
+                    "Sample files stay in the library and are looked up by name on load.",
+                style = MaterialTheme.typography.bodySmall, color = TextDim,
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                TextField(
+                    value = state.newProjectName,
+                    onValueChange = actions.onNewProjectName,
+                    label = { Text("Project name") },
+                    singleLine = true,
+                    colors = TextFieldDefaults.colors(
+                        focusedContainerColor = DarkTab,
+                        unfocusedContainerColor = DarkTab,
+                        focusedTextColor = TextMain,
+                        unfocusedTextColor = TextMain,
+                        focusedLabelColor = TextDim,
+                        unfocusedLabelColor = TextDim,
+                        cursorColor = AccentAmber,
+                    ),
+                    modifier = Modifier.weight(1f),
+                )
+                Button(
+                    onClick = actions.onProjectSave,
+                    colors = ButtonDefaults.buttonColors(containerColor = AccentAmber, contentColor = Color.Black),
+                ) { Text("Save") }
+            }
+            if (state.projectMessage != null) {
+                Text(state.projectMessage, style = MaterialTheme.typography.bodySmall, color = AccentAmber)
+            }
+            if (state.projects.isEmpty()) {
+                Text("No saved projects yet.", style = MaterialTheme.typography.bodySmall, color = TextDim)
+            } else {
+                for ((name, _) in state.projects) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(name, color = TextMain, modifier = Modifier.weight(1f), maxLines = 1)
+                        Button(
+                            onClick = { actions.onProjectLoad(name) },
+                            contentPadding = PaddingValues(4.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = AccentAmber, contentColor = Color.Black),
+                        ) { Text("Load") }
+                        Button(
+                            onClick = { actions.onProjectDelete(name) },
+                            contentPadding = PaddingValues(4.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = DarkTab, contentColor = Color(0xFFFF6B6B)),
+                        ) { Text("Delete") }
+                    }
+                }
+            }
+            Text("Recordings — Master Audio WAVs", style = MaterialTheme.typography.titleMedium, color = TextMain)
+            if (state.masterCaptureFull) {
+                Text(
+                    "Master capture hit its 5-minute cap and stopped itself.",
+                    style = MaterialTheme.typography.bodySmall, color = Color(0xFFFF6B6B),
+                )
+            }
+            if (state.recordings.isEmpty()) {
+                Text(
+                    "No recordings yet. Rec → Master Audio, play, then switch Rec off to save a WAV.",
+                    style = MaterialTheme.typography.bodySmall, color = TextDim,
+                )
+            } else {
+                for (file in state.recordings) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(file, color = TextMain, modifier = Modifier.weight(1f), maxLines = 1)
+                        Button(
+                            onClick = { actions.onRecordingShare(file) },
+                            contentPadding = PaddingValues(4.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = DarkTab, contentColor = TextMain),
+                        ) { Text("Share") }
+                    }
+                }
+            }
         }
     }
 }
@@ -1124,6 +1265,12 @@ private fun PortraitContent(state: PlayRxState, actions: PlayRxActions) {
                 shape = RoundedCornerShape(20.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = DarkTab, contentColor = TextMain),
             ) { Text("Project") }
+            RecMenuButton(state, actions)
+            Button(
+                onClick = actions.onProjectsToggle,
+                shape = RoundedCornerShape(20.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = DarkTab, contentColor = TextMain),
+            ) { Text("Live Set") }
             TransportButtons(state, actions)
         }
         TopTabs(state, actions)
@@ -1175,6 +1322,12 @@ private fun LandscapeContent(state: PlayRxState, actions: PlayRxActions) {
                 shape = RoundedCornerShape(20.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = DarkTab, contentColor = TextMain),
             ) { Text("Project") }
+            RecMenuButton(state, actions)
+            Button(
+                onClick = actions.onProjectsToggle,
+                shape = RoundedCornerShape(20.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = DarkTab, contentColor = TextMain),
+            ) { Text("Live Set") }
             TransportButtons(state, actions)
         }
         TopTabs(state, actions)

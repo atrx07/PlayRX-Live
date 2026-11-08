@@ -1,5 +1,6 @@
 package com.playrx.live
 
+import android.content.Intent
 import android.content.res.Configuration
 import android.os.Bundle
 import android.os.Handler
@@ -11,12 +12,23 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.core.content.FileProvider
 import com.playrx.live.audio.PlayMode
 import com.playrx.live.audio.PlaybackEngine
 import com.playrx.live.audio.PadSample
+import com.playrx.live.audio.ProjectData
+import com.playrx.live.audio.ProjectFile
+import com.playrx.live.audio.ProjectStore
+import com.playrx.live.audio.RecordMode
 import com.playrx.live.audio.SampleBank
 import com.playrx.live.audio.SampleInfo
 import com.playrx.live.audio.SampleStore
+import com.playrx.live.audio.SongTimeline
+import com.playrx.live.audio.WavWriter
+import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import com.playrx.live.midi.MidiEngine
 import com.playrx.live.ui.PlayRxActions
 import com.playrx.live.ui.PlayRxScreen
@@ -102,6 +114,37 @@ class MainActivity : ComponentActivity() {
     private var selectedClipId by mutableStateOf<String?>(null)
     private var songVisibleBars by mutableStateOf(8)
     private var songVersion by mutableStateOf(0)
+    private var showProjects by mutableStateOf(false)
+    private var newProjectName by mutableStateOf("")
+    private var projects by mutableStateOf(listOf<Pair<String, Long>>())
+    private var recordings by mutableStateOf(listOf<String>())
+    private var projectMessage by mutableStateOf<String?>(null)
+    private var recordMode by mutableStateOf("OFF")
+
+    private fun refreshProjectLists() {
+        projects = ProjectStore.list(this).map { it.name to it.lastModified }
+        recordings = ProjectStore.recordingsDir(this).listFiles()
+            ?.filter { it.isFile && it.name.endsWith(".wav") }
+            ?.sortedByDescending { it.lastModified() }
+            ?.map { it.name } ?: emptyList()
+    }
+
+    private fun buildProjectData(name: String): ProjectData {
+        val assignments = engine.importedPadAssignments().entries.joinToString(
+            separator = ",", prefix = "[", postfix = "]",
+        ) { (pad, pair) -> ProjectFile.padAssignmentToJson(pad, pair.first, pair.second) }
+        return ProjectData(
+            name = name,
+            bpm = bpm,
+            projectKeyMidi = projectKeyMidi,
+            masterVolume = masterVolume,
+            defaultQuantizeBeats = defaultQuantizeBeats,
+            defaultSnapToTempo = defaultSnapToTempo,
+            sequencesJson = engine.sequenceStore.toJson(),
+            songJson = engine.songTimeline.toJson(),
+            assignmentsJson = assignments,
+        )
+    }
 
     private fun currentState(): PlayRxState {
         // Read the version counters so pad/column/step edits recompose.
@@ -149,6 +192,14 @@ class MainActivity : ComponentActivity() {
             songLengthBars = engine.songTimeline.lengthBars,
             songVisibleBars = songVisibleBars,
             songBar = ((transportBar - 1) % engine.songTimeline.lengthBars.coerceAtLeast(1)) + 1,
+            showProjects = showProjects,
+            projects = projects,
+            newProjectName = newProjectName,
+            recordMode = recordMode,
+            masterRecording = engine.masterRecording,
+            masterCaptureFull = engine.masterCaptureFull,
+            recordings = recordings,
+            projectMessage = projectMessage,
             activeLoops = activeLoops,
             armedLoops = armedLoops,
             selectedPad = selectedPad,
@@ -428,8 +479,115 @@ class MainActivity : ComponentActivity() {
             }
         },
         onRecordingToggle = {
-            isRecording = !isRecording
-            engine.isRecording = isRecording
+            // The ● Rec button in SEQ mirrors DRUMS mode in the Rec dropdown.
+            val next = if (engine.recordMode == RecordMode.DRUMS) RecordMode.OFF else RecordMode.DRUMS
+            engine.setRecordMode(next)
+            isRecording = engine.isRecording
+            recordMode = next.name
+        },
+        onProjectsToggle = {
+            showProjects = !showProjects
+            if (showProjects) refreshProjectLists()
+        },
+        onNewProjectName = { newProjectName = it },
+        onProjectSave = {
+            val name = ProjectStore.sanitizeName(
+                newProjectName.ifBlank { "Project ${projects.size + 1}" },
+            )
+            val ok = ProjectStore.save(this, name, ProjectFile.toJson(buildProjectData(name)))
+            projectMessage = if (ok) "Saved $name" else "Could not save $name"
+            if (ok) {
+                newProjectName = ""
+                refreshProjectLists()
+            }
+        },
+        onProjectLoad = { name ->
+            val data = ProjectStore.load(this, name)?.let { ProjectFile.fromJson(it) }
+            if (data == null) {
+                projectMessage = "Could not open $name"
+            } else {
+                // A loaded project starts from bar 1.
+                engine.stopAll()
+                isPlaying = false
+                activeLoops = emptySet()
+                armedLoops = emptySet()
+                transportBar = 1
+                transportBeat = 1
+                barProgress = 0f
+                currentStep = -1
+                bpm = data.bpm
+                engine.bpm = data.bpm
+                projectKeyMidi = data.projectKeyMidi
+                engine.setProjectKey(data.projectKeyMidi)
+                masterVolume = data.masterVolume
+                engine.masterVolume = data.masterVolume
+                defaultQuantizeBeats = data.defaultQuantizeBeats
+                defaultSnapToTempo = data.defaultSnapToTempo
+                engine.sequenceStore.loadJson(data.sequencesJson)
+                SongTimeline.fromJson(data.songJson)?.let { engine.songTimeline.loadFrom(it) }
+                selectedClipId = null
+                // Re-assign samples by id; a sample deleted since the
+                // save loads back to the built-in synth, never an error.
+                for (obj in ProjectFile.splitAssignmentObjects(data.assignmentsJson)) {
+                    val parsed = ProjectFile.padAssignmentFromJson(obj) ?: continue
+                    val (pad, sampleId, assignment) = parsed
+                    val info = sampleList.firstOrNull { it.id == sampleId } ?: continue
+                    val decoded = SampleStore.decodeStored(this, info) ?: continue
+                    val targetInfo = info.copy(
+                        category = SampleStore.categoryForColumn(SampleBank.columnOf(pad)),
+                    )
+                    engine.assignImportedSample(pad, decoded.frames, assignment, targetInfo)
+                }
+                sampleVersion++
+                songVersion++
+                patternVersion++
+                projectMessage = "Loaded $name"
+                showProjects = false
+            }
+        },
+        onProjectDelete = { name ->
+            if (ProjectStore.delete(this, name)) {
+                projectMessage = "Deleted $name"
+                refreshProjectLists()
+            } else {
+                projectMessage = "Could not delete $name"
+            }
+        },
+        onRecordMode = { mode ->
+            val parsed = runCatching { RecordMode.valueOf(mode) }.getOrNull() ?: RecordMode.OFF
+            // Leaving MASTER saves the WAV first.
+            if (engine.recordMode == RecordMode.MASTER && parsed != RecordMode.MASTER) {
+                val samples = engine.finishMasterRecording()
+                if (samples != null) {
+                    val stamp = SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date())
+                    val file = File(ProjectStore.recordingsDir(this), "master-$stamp.wav")
+                    projectMessage = if (WavWriter.writeWav(file, samples, SampleBank.SAMPLE_RATE, 1)) {
+                        "Saved ${file.name}"
+                    } else {
+                        "Could not save the recording"
+                    }
+                } else {
+                    projectMessage = "Recording too short — nothing saved"
+                }
+                refreshProjectLists()
+            }
+            engine.setRecordMode(parsed)
+            isRecording = engine.isRecording
+            recordMode = parsed.name
+        },
+        onRecordingShare = { fileName ->
+            val file = File(ProjectStore.recordingsDir(this), fileName)
+            if (file.exists()) {
+                val uri = FileProvider.getUriForFile(this, "com.playrx.live.fileprovider", file)
+                val intent = Intent(Intent.ACTION_SEND).apply {
+                    type = "audio/wav"
+                    putExtra(Intent.EXTRA_STREAM, uri)
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                }
+                startActivity(Intent.createChooser(intent, "Share recording"))
+            } else {
+                projectMessage = "Recording not found: $fileName"
+            }
         },
         onDrumPadClick = { pad ->
             engine.triggerOneShot(pad)

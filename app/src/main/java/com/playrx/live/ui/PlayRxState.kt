@@ -97,6 +97,18 @@ data class PlayRxState(
     val songVisibleBars: Int = 8,
     /** Current bar inside the song loop (1..lengthBars). */
     val songBar: Int = 1,
+    // ---- Projects + Live Set + recording (2026-11-08) ----
+    val showProjects: Boolean = false,
+    /** (name, lastModified) newest first — the Live Set. */
+    val projects: List<Pair<String, Long>> = emptyList(),
+    val newProjectName: String = "",
+    /** OFF / SONG / DRUMS / MASTER. */
+    val recordMode: String = "OFF",
+    val masterRecording: Boolean = false,
+    val masterCaptureFull: Boolean = false,
+    /** WAV files in filesDir/recordings, newest first. */
+    val recordings: List<String> = emptyList(),
+    val projectMessage: String? = null,
 )
 
 /** Every user action the screen can trigger. No-ops by default for screenshots. */
@@ -159,4 +171,11 @@ data class PlayRxActions(
     val onSongClipSplit: () -> Unit = {},
     val onSongClipDelete: () -> Unit = {},
     val onSongZoom: (Int) -> Unit = {},
+    val onProjectsToggle: () -> Unit = {},
+    val onNewProjectName: (String) -> Unit = {},
+    val onProjectSave: () -> Unit = {},
+    val onProjectLoad: (String) -> Unit = {},
+    val onProjectDelete: (String) -> Unit = {},
+    val onRecordMode: (String) -> Unit = {},
+    val onRecordingShare: (String) -> Unit = {},
 )

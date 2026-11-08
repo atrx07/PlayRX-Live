@@ -84,7 +84,10 @@ the grid and hid Edit/Mixer below the fold. Never restore it.
   width. No pinch zoom yet; share-as-stems lands with recording.
 - **Live Set** — home-screen set of projects in chronological
   order; perform across Loop/Drum/Mixer/FX, move to the next
-  project. Not built yet.
+  project. PlayRX (2026-11-08, `docs/PROJECTS.md`): **built** —
+  one JSON file per project (tempo, key, sequences, song,
+  assignments), list newest first in the Live Set overlay, Load /
+  Delete / Save. No auto-save yet.
 - **MIDI** — settings gear > Preferences > MIDI devices, then
   Mapping / Quick Map (tap left to right). PlayRX's edge here
   is USB MIDI chord-following with Yamaha keyboards
@@ -93,7 +96,9 @@ the grid and hid Edit/Mixer below the fold. Never restore it.
   and Bluetooth MIDI come later.
 - **Recording** — top-right Rec dropdown: Song (loops/sequences
   to the timeline), Drums & Sounds (to a sequence), Master
-  Audio. Not built yet in PlayRX.
+  Audio. PlayRX (2026-11-08, `docs/PROJECTS.md`): **built** —
+  all three modes; Master Audio saves a WAV (5-minute cap) with
+  Share via FileProvider. Stem export is still to come.
 
 ## PlayRX implementation mapping
 
