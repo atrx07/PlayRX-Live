@@ -2,6 +2,7 @@ package com.playrx.live.ui
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
@@ -48,11 +49,18 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.playrx.live.audio.BeatRepeat
+import com.playrx.live.audio.DelayDivision
+import com.playrx.live.audio.FxMath
 import com.playrx.live.audio.SampleBank
 import com.playrx.live.audio.ScaleKeyboard
+import kotlin.math.ln
 
 /**
  * The PlayRX screen as standalone composables, driven only by
@@ -533,6 +541,175 @@ private fun ColumnMixer(state: PlayRxState, actions: PlayRxActions) {
 }
 
 @Composable
+private fun FxPanel(state: PlayRxState, actions: PlayRxActions) {
+    // FX panel (2026-11-08): tempo-synced delay, beat repeat, XY
+    // pad (X = master filter, Y = delay mix), per-column sends.
+    Text("FX — Delay", style = MaterialTheme.typography.titleMedium, color = TextMain)
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text("Delay", color = TextMain, modifier = Modifier.weight(1f))
+        Switch(checked = state.delayOn, onCheckedChange = actions.onDelayChange)
+    }
+    if (state.delayOn) {
+        Text("Division", color = TextMain)
+        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            for (div in DelayDivision.values()) {
+                val sel = state.delayDivisionBeats == div.beats
+                Button(
+                    onClick = { actions.onDelayDivision(div.beats) },
+                    contentPadding = PaddingValues(4.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (sel) AccentAmber else DarkTab,
+                        contentColor = if (sel) Color.Black else TextDim,
+                    ),
+                ) { Text(div.label, fontSize = 10.sp, maxLines = 1, softWrap = false) }
+            }
+        }
+        Text("Mix: ${(state.delayMix * 100).toInt()}%", color = TextMain)
+        Slider(
+            value = state.delayMix,
+            onValueChange = actions.onDelayMix,
+            valueRange = 0f..1f,
+            colors = SliderDefaults.colors(thumbColor = Color.White, activeTrackColor = AccentAmber, inactiveTrackColor = DarkTab),
+        )
+        Text("Feedback: ${(state.delayFeedback * 100).toInt()}%", color = TextMain)
+        Slider(
+            value = state.delayFeedback,
+            onValueChange = actions.onDelayFeedback,
+            valueRange = 0f..0.95f,
+            colors = SliderDefaults.colors(thumbColor = Color.White, activeTrackColor = AccentAmber, inactiveTrackColor = DarkTab),
+        )
+    }
+    Text("Beat repeat", style = MaterialTheme.typography.titleMedium, color = TextMain)
+    Text(
+        "Freezes the slice you just played and stutters it until Off.",
+        style = MaterialTheme.typography.bodySmall, color = TextDim,
+    )
+    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+        for (rep in BeatRepeat.values()) {
+            val sel = state.beatRepeat == rep.label
+            Button(
+                onClick = { actions.onBeatRepeat(rep.label) },
+                contentPadding = PaddingValues(4.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = if (sel) AccentAmber else DarkTab,
+                    contentColor = if (sel) Color.Black else TextDim,
+                ),
+            ) { Text(rep.label, fontSize = 10.sp, maxLines = 1, softWrap = false) }
+        }
+    }
+    if (state.beatRepeat != "Off") {
+        Text("Repeat mix: ${(state.beatRepeatMix * 100).toInt()}%", color = TextMain)
+        Slider(
+            value = state.beatRepeatMix,
+            onValueChange = actions.onBeatRepeatMix,
+            valueRange = 0f..1f,
+            colors = SliderDefaults.colors(thumbColor = Color.White, activeTrackColor = AccentAmber, inactiveTrackColor = DarkTab),
+        )
+    }
+    Text("XY — X: master filter, Y: delay mix", style = MaterialTheme.typography.titleMedium, color = TextMain)
+    XyPad(state, actions)
+    Text(
+        "Filter: ${formatCutoff(state.masterFilterCutoffHz)} · Delay mix: ${(state.delayMix * 100).toInt()}%",
+        style = MaterialTheme.typography.bodySmall, color = TextDim,
+    )
+    Text("Routing — delay send per column", style = MaterialTheme.typography.titleMedium, color = TextMain)
+    for (col in 0 until SampleBank.COLUMNS) {
+        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(SampleBank.COLUMN_NAMES[col], modifier = Modifier.width(52.dp), color = TextMain)
+            Slider(
+                value = state.columnSends[col],
+                onValueChange = { actions.onColumnSend(col, it) },
+                valueRange = 0f..1f,
+                colors = SliderDefaults.colors(
+                    thumbColor = columnColor(col),
+                    activeTrackColor = columnColor(col),
+                    inactiveTrackColor = columnColor(col).copy(alpha = 0.25f),
+                ),
+                modifier = Modifier.weight(1f),
+            )
+        }
+    }
+}
+
+private fun formatCutoff(hz: Float): String = when {
+    hz <= 0f -> "Off"
+    hz >= 1000f -> "%.1f kHz".format(hz / 1000f)
+    else -> "${hz.toInt()} Hz"
+}
+
+/** Slider 0..1 <-> cutoff Hz (log 200..18000); 0 = bypass. */
+private fun filterSliderToHz(t: Float): Float =
+    if (t <= 0.02f) 0f else (200f * kotlin.math.exp(t * ln(90f)))
+
+private fun filterHzToSlider(hz: Float): Float =
+    if (hz <= 0f) 0f else (ln(hz / 200f) / ln(90f)).coerceIn(0f, 1f)
+
+@Composable
+private fun XyPad(state: PlayRxState, actions: PlayRxActions) {
+    var padSize by remember { mutableStateOf(IntSize.Zero) }
+    val x = FxMath.cutoffToXy(state.masterFilterCutoffHz)
+    val y = state.delayMix
+    Canvas(
+        modifier = Modifier.size(140.dp)
+            .onSizeChanged { padSize = it }
+            .pointerInput(Unit) {
+                detectDragGestures(
+                    onDragStart = { offset ->
+                        if (padSize.width > 0 && padSize.height > 0) {
+                            actions.onXy(
+                                (offset.x / padSize.width).coerceIn(0f, 1f),
+                                1f - (offset.y / padSize.height).coerceIn(0f, 1f),
+                            )
+                        }
+                    },
+                    onDrag = { change, _ ->
+                        if (padSize.width > 0 && padSize.height > 0) {
+                            actions.onXy(
+                                (change.position.x / padSize.width).coerceIn(0f, 1f),
+                                1f - (change.position.y / padSize.height).coerceIn(0f, 1f),
+                            )
+                        }
+                    },
+                )
+            },
+    ) {
+        drawRect(color = DarkTab, size = size)
+        val px = x * size.width
+        val py = (1f - y) * size.height
+        drawLine(AccentAmber, Offset(px, 0f), Offset(px, size.height), strokeWidth = 2f)
+        drawLine(AccentAmber, Offset(0f, py), Offset(size.width, py), strokeWidth = 2f)
+        drawCircle(color = AccentAmber, radius = 14f, center = Offset(px, py))
+        drawCircle(color = Color.Black, radius = 6f, center = Offset(px, py))
+    }
+}
+
+@Composable
+private fun ColumnFilterPanel(state: PlayRxState, actions: PlayRxActions) {
+    Text(
+        "One-pole low-pass per column. Slider left = bypass; right = 18 kHz.",
+        style = MaterialTheme.typography.bodySmall, color = TextDim,
+    )
+    for (col in 0 until SampleBank.COLUMNS) {
+        val hz = state.columnFilters[col]
+        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(SampleBank.COLUMN_NAMES[col], modifier = Modifier.width(52.dp), color = TextMain)
+            Slider(
+                value = filterHzToSlider(hz),
+                onValueChange = { actions.onColumnFilter(col, filterSliderToHz(it)) },
+                valueRange = 0f..1f,
+                colors = SliderDefaults.colors(
+                    thumbColor = columnColor(col),
+                    activeTrackColor = columnColor(col),
+                    inactiveTrackColor = columnColor(col).copy(alpha = 0.25f),
+                ),
+                modifier = Modifier.weight(1f),
+            )
+            Text(formatCutoff(hz), modifier = Modifier.width(64.dp), color = TextDim, fontSize = 11.sp)
+        }
+    }
+}
+
+@Composable
 private fun TransportButtons(state: PlayRxState, actions: PlayRxActions) {
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         Button(
@@ -733,11 +910,7 @@ private fun BottomPanel(state: PlayRxState, actions: PlayRxActions, modifier: Mo
                 )
             }
             "FX" -> {
-                Text("FX — Delay for now; beat-repeat and XY pad come next.", style = MaterialTheme.typography.bodySmall, color = TextDim)
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Delay FX")
-                    Switch(checked = state.delayOn, onCheckedChange = actions.onDelayChange)
-                }
+                FxPanel(state, actions)
             }
             "SAMPLES" -> {
                 Text(
@@ -785,11 +958,30 @@ private fun BottomPanel(state: PlayRxState, actions: PlayRxActions, modifier: Mo
                 }
             }
             else -> {
-                // MIXER is now only the per-column strips (2026-11-02).
-                // Tempo, project key and master volume moved to the
-                // Project settings menu (top bar), not here.
-                Text("Mixer — VOLUMES", style = MaterialTheme.typography.bodySmall, color = TextDim)
-                ColumnMixer(state, actions)
+                // MIXER: inner tabs Volumes / Eq Filter (2026-11-02
+                // Volumes; 2026-11-08 Eq Filter = per-column one-pole
+                // low-pass). Tempo, project key and master volume live
+                // in the Project settings menu (top bar), not here.
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    for (tab in listOf("Volumes", "Eq Filter")) {
+                        val sel = state.mixerTab == tab
+                        Button(
+                            onClick = { actions.onMixerTab(tab) },
+                            contentPadding = PaddingValues(4.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = if (sel) AccentAmber else DarkTab,
+                                contentColor = if (sel) Color.Black else TextDim,
+                            ),
+                        ) { Text(tab, fontSize = 11.sp, maxLines = 1, softWrap = false) }
+                    }
+                }
+                if (state.mixerTab == "Eq Filter") {
+                    Text("Mixer — EQ FILTER (one-pole low-pass per column)", style = MaterialTheme.typography.bodySmall, color = TextDim)
+                    ColumnFilterPanel(state, actions)
+                } else {
+                    Text("Mixer — VOLUMES", style = MaterialTheme.typography.bodySmall, color = TextDim)
+                    ColumnMixer(state, actions)
+                }
             }
         }
     }

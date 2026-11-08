@@ -34,12 +34,15 @@ the grid and hid Edit/Mixer below the fold. Never restore it.
 - **Mixer** — lower panel with two tabs inside it: Volume
   (VOLUMES: 8 faders, one per column, colour-coded, M and S under
   each) and Eq Filter. The same panel appears under Loop, under
-  Live Set, and under the Song timeline. PlayRX v1: per-column
-  faders + M/S, plus tempo (BPM) and master volume. EQ/Filter
-  per channel is NOT built yet.
+  Live Set, and under the Song timeline. PlayRX: per-column
+  faders + M/S, plus tempo (BPM) and master volume; Eq Filter
+  built 2026-11-08 (`docs/FX.md`) — one-pole low-pass per column,
+  log 200 Hz..18 kHz, left = bypass. Not a 3-band EQ.
 - **FX** — routing, Master + channels 1–8, beat-repeat divisions
-  (1/16, 1/8, 1/4, 1/2, 1, 2), XY pad. PlayRX v1: Delay FX switch
-  only; beat-repeat and XY pad are next, not faked.
+  (1/16, 1/8, 1/4, 1/2, 1, 2), XY pad. PlayRX built 2026-11-08
+  (`docs/FX.md`): tempo-synced delay (divisions, mix, feedback),
+  beat repeat (1/16–2), XY pad (X = master filter, Y = delay
+  mix), per-column delay sends. No reverb, no per-pad inserts.
 - **Samples / Collection** — folders/tags/packs, AI recommendations
   for replacing a pad's sample. PlayRX v1: placeholder only.
   The planned route is sample import in PlayRX's own JSON

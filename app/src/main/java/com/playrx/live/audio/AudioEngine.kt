@@ -251,7 +251,74 @@ class PlaybackEngine {
     var isPlaying: Boolean = false
         private set
     var masterVolume: Float = 0.8f
-    var delayEnabled: Boolean = false
+
+    /** FX panel state (2026-11-08, see FxEngine.kt). The mixer
+     * reads it every block; the UI writes it through the setters
+     * below so beat-repeat enable/disable can freeze its slice. */
+    var fxState: FxState = FxState()
+        private set
+    private val columnFilterY = FloatArray(8)
+    private var masterFilterY = 0f
+    private val repeatBuf = FloatArray(SampleBank.SAMPLE_RATE * 10)
+    private var repeatWritePos = 0
+    private var repeatStartPos = 0
+    private var repeatLenFrames = 0
+    private var repeatActive = false
+
+    fun setDelayEnabled(enabled: Boolean) {
+        fxState = fxState.copy(delayEnabled = enabled)
+    }
+
+    fun setDelayDivision(beats: Float) {
+        fxState = fxState.copy(delayDivisionBeats = beats.coerceIn(0.25f, 2f))
+    }
+
+    fun setDelayMix(mix: Float) {
+        fxState = fxState.copy(delayMix = mix.coerceIn(0f, 1f))
+    }
+
+    fun setDelayFeedback(feedback: Float) {
+        fxState = fxState.copy(delayFeedback = feedback.coerceIn(0f, 0.95f))
+    }
+
+    /** Enabling freezes the slice that just played (length =
+     * the division at the current BPM) and stutters it until Off. */
+    fun setBeatRepeat(repeat: BeatRepeat) {
+        if (repeat == fxState.beatRepeat) return
+        fxState = fxState.copy(beatRepeat = repeat)
+        if (repeat == BeatRepeat.OFF) {
+            repeatActive = false
+        } else {
+            repeatLenFrames = FxMath.divisionFrames(repeat.beats, bpm, SampleBank.SAMPLE_RATE)
+            repeatStartPos = ((repeatWritePos - repeatLenFrames) % repeatBuf.size + repeatBuf.size) % repeatBuf.size
+            repeatActive = true
+        }
+    }
+
+    fun setBeatRepeatMix(mix: Float) {
+        fxState = fxState.copy(beatRepeatMix = mix.coerceIn(0f, 1f))
+    }
+
+    fun setMasterFilterCutoff(hz: Float) {
+        fxState = fxState.copy(masterFilterCutoffHz = hz.coerceIn(0f, 18000f))
+    }
+
+    fun setColumnSend(col: Int, value: Float) {
+        if (col in 0..7) fxState = fxState.withColumnSend(col, value)
+    }
+
+    fun setColumnFilter(col: Int, hz: Float) {
+        if (col in 0..7) fxState = fxState.withColumnFilter(col, hz)
+    }
+
+    /** XY pad: X = master filter cutoff (log 80..18000 Hz),
+     * Y = delay mix (0..1, top = 1). */
+    fun setXy(x: Float, y: Float) {
+        fxState = fxState.copy(
+            masterFilterCutoffHz = FxMath.xyToCutoff(x),
+            delayMix = y.coerceIn(0f, 1f),
+        )
+    }
 
     var onStepChanged: ((Int) -> Unit)? = null
     /** Bar (1-based), beat in bar (1..4), progress through the bar 0..1. */
@@ -959,9 +1026,11 @@ class PlaybackEngine {
     private fun mixLoop(at: AudioTrack) {
         val blockFrames = 512
         val outShorts = ShortArray(blockFrames * 2)
-        // 1-second delay line (mono, shared by both channels).
-        val delayBuf = FloatArray(SampleBank.SAMPLE_RATE)
+        // 4-second delay line (mono, shared by both channels).
+        // 4 s covers the longest division (2 beats) even at 60 BPM.
+        val delayBuf = FloatArray(SampleBank.SAMPLE_RATE * 4)
         var delayPos = 0
+        val colSum = FloatArray(8)
 
         while (running) {
             // Drain pending one-shots into the voice list.
@@ -1075,13 +1144,10 @@ class PlaybackEngine {
                 }
                 voices.addAll(swapped)
             }
-            // Delay time: dotted eighth at current BPM.
-            val delaySamples = ((60.0 / bpm * 0.75) * SampleBank.SAMPLE_RATE).toInt()
-                .coerceIn(1, delayBuf.size - 1)
-
             for (frame in 0 until blockFrames) {
-                var left = 0f
-                var right = 0f
+                // Sum voices per column first: the per-column filter
+                // and the delay send both work on column sums.
+                java.util.Arrays.fill(colSum, 0f)
                 val iter = voices.iterator()
                 while (iter.hasNext()) {
                     val v = iter.next()
@@ -1107,15 +1173,59 @@ class PlaybackEngine {
                         }
                     }
                     val s = v.sample[v.pos] * v.volume
-                    left += s
-                    right += s
+                    colSum[SampleBank.columnOf(v.sourcePad)] += s
                     v.pos++
                 }
-                var dry = (left + right) * 0.5f * masterVolume
-                if (delayEnabled) {
+                // Per-column one-pole low-pass (Mixer "Eq Filter" tab),
+                // then the master sum; the delay eats a per-column
+                // send of the filtered signal.
+                var dry = 0f
+                var delayInput = 0f
+                for (c in 0..7) {
+                    val cutoff = fxState.columnFilterCutoffHz[c]
+                    val filtered = if (cutoff <= 0f || cutoff >= 18000f) {
+                        colSum[c]
+                    } else {
+                        columnFilterY[c] = FxMath.onePole(
+                            colSum[c], columnFilterY[c],
+                            FxMath.onePoleAlpha(cutoff, SampleBank.SAMPLE_RATE),
+                        )
+                        columnFilterY[c]
+                    }
+                    dry += filtered
+                    delayInput += filtered * fxState.columnSends[c]
+                }
+                dry *= masterVolume
+                // Master filter (XY pad X): one-pole low-pass on the mix.
+                val masterCutoff = fxState.masterFilterCutoffHz
+                if (masterCutoff > 0f && masterCutoff < 18000f) {
+                    masterFilterY = FxMath.onePole(
+                        dry, masterFilterY,
+                        FxMath.onePoleAlpha(masterCutoff, SampleBank.SAMPLE_RATE),
+                    )
+                    dry = masterFilterY
+                }
+                // Beat repeat: the dry mix is always recorded into
+                // the ring; while active, the output stutters the
+                // slice frozen at enable time.
+                repeatBuf[repeatWritePos] = dry
+                repeatWritePos = (repeatWritePos + 1) % repeatBuf.size
+                if (repeatActive) {
+                    val readPos = FxMath.repeatReadPos(
+                        repeatWritePos, repeatStartPos, repeatLenFrames, repeatBuf.size,
+                    )
+                    val repeated = repeatBuf[readPos]
+                    dry = dry * (1f - fxState.beatRepeatMix) + repeated * fxState.beatRepeatMix
+                }
+                // Tempo-synced feedback delay on the master mix.
+                if (fxState.delayEnabled) {
+                    val delaySamples = FxMath.divisionFrames(
+                        fxState.delayDivisionBeats, bpm, SampleBank.SAMPLE_RATE,
+                    ).coerceIn(1, delayBuf.size - 1)
                     val delayed = delayBuf[delayPos]
-                    dry += delayed * 0.25f
-                    delayBuf[delayPos] = dry * 0.35f + (left + right) * 0.5f * masterVolume * 0.65f
+                    dry += delayed * fxState.delayMix
+                    delayBuf[delayPos] =
+                        delayInput * masterVolume + delayed * fxState.delayFeedback
                     delayPos = (delayPos + 1) % delaySamples
                     // Keep delayPos within the active delay window.
                     if (delayPos >= delaySamples) delayPos = 0

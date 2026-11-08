@@ -120,6 +120,15 @@ class MainActivity : ComponentActivity() {
     private var recordings by mutableStateOf(listOf<String>())
     private var projectMessage by mutableStateOf<String?>(null)
     private var recordMode by mutableStateOf("OFF")
+    private var delayDivisionBeats by mutableStateOf(0.75f)
+    private var delayMix by mutableStateOf(0.25f)
+    private var delayFeedback by mutableStateOf(0.35f)
+    private var beatRepeat by mutableStateOf("Off")
+    private var beatRepeatMix by mutableStateOf(0.7f)
+    private var masterFilterCutoffHz by mutableStateOf(0f)
+    private var columnSends by mutableStateOf(List(8) { 0.5f })
+    private var columnFilters by mutableStateOf(List(8) { 0f })
+    private var mixerTab by mutableStateOf("Volumes")
 
     private fun refreshProjectLists() {
         projects = ProjectStore.list(this).map { it.name to it.lastModified }
@@ -166,6 +175,15 @@ class MainActivity : ComponentActivity() {
             bpm = bpm,
             masterVolume = masterVolume,
             delayOn = delayOn,
+            delayDivisionBeats = delayDivisionBeats,
+            delayMix = delayMix,
+            delayFeedback = delayFeedback,
+            beatRepeat = beatRepeat,
+            beatRepeatMix = beatRepeatMix,
+            masterFilterCutoffHz = masterFilterCutoffHz,
+            columnSends = columnSends,
+            columnFilters = columnFilters,
+            mixerTab = mixerTab,
             currentStep = currentStep,
             transportBar = transportBar,
             transportBeat = transportBeat,
@@ -276,7 +294,45 @@ class MainActivity : ComponentActivity() {
         },
         onDelayChange = {
             delayOn = it
-            engine.delayEnabled = it
+            engine.setDelayEnabled(it)
+        },
+        onDelayDivision = {
+            delayDivisionBeats = it
+            engine.setDelayDivision(it)
+        },
+        onDelayMix = {
+            delayMix = it
+            engine.setDelayMix(it)
+        },
+        onDelayFeedback = {
+            delayFeedback = it
+            engine.setDelayFeedback(it)
+        },
+        onBeatRepeat = {
+            beatRepeat = it
+            engine.setBeatRepeat(com.playrx.live.audio.BeatRepeat.fromLabel(it))
+        },
+        onBeatRepeatMix = {
+            beatRepeatMix = it
+            engine.setBeatRepeatMix(it)
+        },
+        onMasterFilterCutoff = {
+            masterFilterCutoffHz = it
+            engine.setMasterFilterCutoff(it)
+        },
+        onColumnSend = { col, value ->
+            columnSends = columnSends.mapIndexed { i, v -> if (i == col) value else v }
+            engine.setColumnSend(col, value)
+        },
+        onColumnFilter = { col, hz ->
+            columnFilters = columnFilters.mapIndexed { i, v -> if (i == col) hz else v }
+            engine.setColumnFilter(col, hz)
+        },
+        onMixerTab = { mixerTab = it },
+        onXy = { x, y ->
+            engine.setXy(x, y)
+            masterFilterCutoffHz = engine.fxState.masterFilterCutoffHz
+            delayMix = engine.fxState.delayMix
         },
         onEditToggle = { editPattern = !editPattern },
         onTabSelect = {

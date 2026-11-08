@@ -102,6 +102,32 @@ private fun seqState(): PlayRxState {
     )
 }
 
+private fun fxState(): PlayRxState {
+    return PlayRxState(
+        chordText = "C major",
+        midiStatus = "PSR-SX700 connected via USB",
+        selectedPanel = "FX",
+        delayOn = true,
+        delayDivisionBeats = 0.75f,
+        delayMix = 0.4f,
+        delayFeedback = 0.5f,
+        beatRepeat = "1/8",
+        beatRepeatMix = 0.7f,
+        masterFilterCutoffHz = 2400f,
+        columnSends = listOf(0.8f, 0.5f, 0.5f, 0.3f, 0.5f, 0.6f, 0.5f, 0.5f),
+    )
+}
+
+private fun mixerEqState(): PlayRxState {
+    return PlayRxState(
+        chordText = "C major",
+        midiStatus = "PSR-SX700 connected via USB",
+        selectedPanel = "MIXER",
+        mixerTab = "Eq Filter",
+        columnFilters = listOf(0f, 0f, 800f, 0f, 2400f, 0f, 0f, 12000f),
+    )
+}
+
 private fun projectsState(): PlayRxState {
     return PlayRxState(
         chordText = "C major",
@@ -207,6 +233,14 @@ class PhonePortraitScreenshotTest {
     @Test fun projectsOverlay() {
         paparazzi.snapshot { PlayRxScreen(projectsState(), isLandscape = false) }
     }
+
+    @Test fun fxPanel() {
+        paparazzi.snapshot { PlayRxScreen(fxState(), isLandscape = false) }
+    }
+
+    @Test fun mixerEq() {
+        paparazzi.snapshot { PlayRxScreen(mixerEqState(), isLandscape = false) }
+    }
 }
 
 class PhoneLandscapeScreenshotTest {
@@ -246,6 +280,14 @@ class PhoneLandscapeScreenshotTest {
 
     @Test fun projectsOverlay() {
         paparazzi.snapshot { PlayRxScreen(projectsState(), isLandscape = true) }
+    }
+
+    @Test fun fxPanel() {
+        paparazzi.snapshot { PlayRxScreen(fxState(), isLandscape = true) }
+    }
+
+    @Test fun mixerEq() {
+        paparazzi.snapshot { PlayRxScreen(mixerEqState(), isLandscape = true) }
     }
 }
 
@@ -287,6 +329,14 @@ class TabletPortraitScreenshotTest {
     @Test fun projectsOverlay() {
         paparazzi.snapshot { PlayRxScreen(projectsState(), isLandscape = false) }
     }
+
+    @Test fun fxPanel() {
+        paparazzi.snapshot { PlayRxScreen(fxState(), isLandscape = false) }
+    }
+
+    @Test fun mixerEq() {
+        paparazzi.snapshot { PlayRxScreen(mixerEqState(), isLandscape = false) }
+    }
 }
 
 class TabletLandscapeScreenshotTest {
@@ -326,5 +376,13 @@ class TabletLandscapeScreenshotTest {
 
     @Test fun projectsOverlay() {
         paparazzi.snapshot { PlayRxScreen(projectsState(), isLandscape = true) }
+    }
+
+    @Test fun fxPanel() {
+        paparazzi.snapshot { PlayRxScreen(fxState(), isLandscape = true) }
+    }
+
+    @Test fun mixerEq() {
+        paparazzi.snapshot { PlayRxScreen(mixerEqState(), isLandscape = true) }
     }
 }
